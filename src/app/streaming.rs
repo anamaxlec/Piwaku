@@ -337,6 +337,12 @@ impl Waku {
                 // `accepts_turn_output` deliberately.
                 self.handle_background_work_event(session_id, event);
             }
+            DriverEvent::TodoStateUpdated(snapshot) => {
+                // PIWAKU: agent-owned task list — session state like
+                // background work, never turn output.
+                runtime.todo_state = Some(snapshot);
+                cx.notify();
+            }
             DriverEvent::Permission {
                 request_id,
                 title,

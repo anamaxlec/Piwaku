@@ -35,8 +35,8 @@ use crate::model::{
     ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
     MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe,
     ProviderResumeCursor, QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus,
-    SessionWorkspace, TranscriptBlock, TurnStatus, UserInputAnswer, UserInputQuestion,
-    compact_path, unix_time, unix_time_millis,
+    SessionWorkspace, TodoSnapshot, TodoTask, TodoTaskStatus, TranscriptBlock, TurnStatus,
+    UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -864,6 +864,8 @@ struct SessionRuntime {
     stream_remeasure_pending: bool,
     pending_permission: Option<PendingPermission>,
     pending_user_input: Option<PendingUserInput>,
+    /// PIWAKU: latest agent task-list snapshot for the native panel.
+    todo_state: Option<TodoSnapshot>,
     pending_computer_approval: Option<PendingComputerApproval>,
     /// Back-to-front stack of window previews captured during the active turn.
     computer_use_previews: Vec<ComputerUsePreview>,
@@ -1340,6 +1342,9 @@ pub struct Waku {
     sidebar_rendered_width: f32,
     right_panel_rendered_width: f32,
     fps_counter_visible: bool,
+    /// PIWAKU: whether the native task panel sits collapsed above the
+    /// composer. App-level preference, not per-session state.
+    todo_panel_collapsed: bool,
     panel_resize_drag: Option<PanelResizeDrag>,
     right_panel_session_states: HashMap<Uuid, RightPanelSessionState>,
     right_panel_surfaces: Vec<RightPanelSurface>,
@@ -1612,6 +1617,7 @@ mod sidebar;
 mod skills_page;
 mod streaming;
 mod task_switcher;
+mod todo_panel;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
@@ -1946,10 +1952,8 @@ impl Waku {
         });
 
         let composer = cx.new(|cx| ComposerInput::new(window, cx).padding_x(px(14.0), cx));
-        let user_input_answer = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("user_input.other_placeholder"))
-        });
+        let user_input_answer = cx
+            .new(|cx| TextInput::new(window, cx).placeholder(tr!("user_input.other_placeholder")));
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2002,14 +2006,10 @@ impl Waku {
                 .select_all_on_focus_click()
                 .placeholder(tr!("input.detected_automatically"))
         });
-        let usage_project_filter = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("input.filter_projects"))
-        });
-        let right_panel_diff_filter = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("diff.filter_files"))
-        });
+        let usage_project_filter =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
+        let right_panel_diff_filter =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);
@@ -2541,14 +2541,11 @@ impl Waku {
                 )
                 .detach();
             }
-            cx.subscribe(
-                &skills_search,
-                |_: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited) {
-                        cx.notify();
-                    }
-                },
-            )
+            cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
             .detach();
             cx.subscribe(
                 &session_rename_input,
@@ -2854,6 +2851,7 @@ impl Waku {
                     0.0
                 },
                 fps_counter_visible: false,
+                todo_panel_collapsed: false,
                 panel_resize_drag: None,
                 right_panel_session_states: HashMap::new(),
                 right_panel_surfaces: Vec::new(),

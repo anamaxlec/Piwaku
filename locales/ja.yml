@@ -577,6 +577,8 @@ composer.remove_followup: キューから削除
 user_input.confirm_ok: 確認
 user_input.confirm_cancel: キャンセル
 user_input.dismiss: キャンセル
+todo_panel.title: タスク
+todo_panel.progress: "%{completed} / %{total}"
 user_input.other_placeholder: 別の回答を入力
 user_input.back: 戻る
 user_input.next: 次へ

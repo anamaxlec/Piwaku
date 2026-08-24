@@ -1641,6 +1641,9 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::RichActivity(activity) => ("richActivity", serde_json::to_value(activity)?),
         DriverEvent::BackgroundWork(work) => ("backgroundWork", serde_json::to_value(work)?),
+        DriverEvent::TodoStateUpdated(snapshot) => {
+            ("todoStateUpdated", serde_json::to_value(snapshot)?)
+        }
         DriverEvent::Permission {
             request_id,
             title,

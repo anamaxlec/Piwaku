@@ -2888,6 +2888,7 @@ impl Waku {
                 stream_remeasure_pending: false,
                 pending_permission: None,
                 pending_user_input: None,
+                todo_state: None,
                 pending_computer_approval: None,
                 computer_use_previews: Vec::new(),
                 computer_session_grants: HashSet::new(),

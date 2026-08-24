@@ -1133,6 +1133,14 @@ user_input.dismiss:
   en: Cancel
   ja: キャンセル
   zh-CN: 取消
+todo_panel.title:
+  en: Tasks
+  ja: タスク
+  zh-CN: 任务
+todo_panel.progress:
+  en: "%{completed} / %{total}"
+  ja: "%{completed} / %{total}"
+  zh-CN: "%{completed} / %{total}"
 user_input.other_placeholder:
   en: Type another answer
 user_input.back:

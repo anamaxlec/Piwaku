@@ -15,7 +15,9 @@
 
 use serde_json::{Value, json};
 
-use crate::model::{UserInputAnswer, UserInputOption, UserInputQuestion};
+use crate::model::{
+    TodoSnapshot, TodoTask, TodoTaskStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
+};
 
 /// The dialog primitives this bridge understands. Fire-and-forget requests
 /// (`notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`) are
@@ -70,7 +72,11 @@ impl PendingExtensionUi {
     /// callers treat as "leave the request unanswered" rather than sending a
     /// corrupt frame. Pi routes inbound lines by `type` and resolves the
     /// pending promise by `id`, so both ride on every frame.
-    pub(crate) fn build_response(&self, request_id: &str, answers: &[UserInputAnswer]) -> Option<Value> {
+    pub(crate) fn build_response(
+        &self,
+        request_id: &str,
+        answers: &[UserInputAnswer],
+    ) -> Option<Value> {
         if Self::is_cancelled(answers) {
             return Some(self.frame(request_id, json!({ "cancelled": true })));
         }
@@ -98,6 +104,61 @@ impl PendingExtensionUi {
         }
         fields
     }
+}
+
+/// PIWAKU: rebuild the agent's task list from a successful `todo` tool
+/// result. rpiv-todo returns the complete snapshot under `details` on every
+/// call, so this never diffs — invalid entries are skipped individually and
+/// `None` means the payload carried no list at all (leave current state).
+pub(crate) fn parse_todo_snapshot(result: &Value) -> Option<TodoSnapshot> {
+    let details = result.get("details")?;
+    let entries = details.get("tasks")?.as_array()?;
+    let mut tasks = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some(id) = entry.get("id").and_then(Value::as_u64) else {
+            continue;
+        };
+        let Some(subject) = entry
+            .get("subject")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let Some(status) = entry.get("status").and_then(Value::as_str) else {
+            continue;
+        };
+        let status = match status {
+            "pending" => TodoTaskStatus::Pending,
+            "in_progress" => TodoTaskStatus::InProgress,
+            "completed" => TodoTaskStatus::Completed,
+            "deleted" => TodoTaskStatus::Deleted,
+            _ => continue,
+        };
+        let description = entry
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let active_form = entry
+            .get("activeForm")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let blocked_by = entry
+            .get("blockedBy")
+            .and_then(Value::as_array)
+            .map(|ids| ids.iter().filter_map(Value::as_u64).collect())
+            .unwrap_or_default();
+        tasks.push(TodoTask {
+            id,
+            subject,
+            description,
+            active_form,
+            status,
+            blocked_by,
+        });
+    }
+    let next_id = details.get("nextId").and_then(Value::as_u64)?;
+    Some(TodoSnapshot { tasks, next_id })
 }
 
 /// A normalized inbound request: everything needed to emit one
@@ -285,7 +346,9 @@ mod tests {
             method: ExtensionUiMethod::Select,
             option_labels: vec!["1. Alpha — a".into(), "2. Beta — b".into()],
         };
-        let response = pending.build_response("req-9", &answers(&["1. Alpha — a"])).unwrap();
+        let response = pending
+            .build_response("req-9", &answers(&["1. Alpha — a"]))
+            .unwrap();
         assert_eq!(
             response,
             json!({ "type": "extension_ui_response", "id": "req-9", "value": "1. Alpha — a" })
@@ -325,8 +388,42 @@ mod tests {
             json!({ "type": "extension_ui_response", "id": "i1", "cancelled": true })
         );
         assert_eq!(
-            pending.build_response("i1", &answers(&["typed answer"])).unwrap(),
+            pending
+                .build_response("i1", &answers(&["typed answer"]))
+                .unwrap(),
             json!({ "type": "extension_ui_response", "id": "i1", "value": "typed answer" })
         );
+    }
+
+    #[test]
+    fn todo_snapshots_parse_from_tool_results() {
+        let result = json!({
+            "content": [{ "type": "text", "text": "ok" }],
+            "details": {
+                "action": "update",
+                "params": {},
+                "nextId": 4,
+                "tasks": [
+                    { "id": 1, "subject": "Done task", "status": "completed" },
+                    { "id": 2, "subject": "Active task", "status": "in_progress", "activeForm": "writing tests", "blockedBy": [1] },
+                    { "id": 3, "subject": "Pending task", "status": "pending", "description": "later" },
+                    { "id": 9, "subject": "Gone", "status": "deleted" },
+                    { "id": "bad", "subject": "Broken", "status": "pending" },
+                    { "subject": "No id", "status": "pending" }
+                ]
+            }
+        });
+        let snapshot = parse_todo_snapshot(&result).expect("parses");
+        assert_eq!(snapshot.next_id, 4);
+        let tasks: Vec<_> = snapshot.visible_tasks().collect();
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(snapshot.completed_count(), 1);
+        assert_eq!(tasks[1].active_form.as_deref(), Some("writing tests"));
+        assert_eq!(tasks[1].blocked_by, vec![1]);
+        assert_eq!(tasks[2].description.as_deref(), Some("later"));
+
+        // No details / no tasks key → leave current state alone.
+        assert_eq!(parse_todo_snapshot(&json!({})), None);
+        assert_eq!(parse_todo_snapshot(&json!({ "details": {} })), None);
     }
 }

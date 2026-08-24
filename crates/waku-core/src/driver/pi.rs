@@ -1459,6 +1459,15 @@ fn handle_pi_message(
             };
             let complete = event_type == "tool_execution_end";
             let failed = value.get("isError").and_then(Value::as_bool) == Some(true);
+            // PIWAKU: rpiv-todo returns the full task list on every call —
+            // feed the native task panel.
+            if complete
+                && !failed
+                && tool_name == Some("todo")
+                && let Some(snapshot) = output.and_then(pi_extensions::parse_todo_snapshot)
+            {
+                let _ = events.send(DriverEvent::TodoStateUpdated(snapshot));
+            }
             let item = activity::tool_activity(
                 id.clone(),
                 kind,
@@ -2385,7 +2394,10 @@ process.stdin.on("data", (chunk) => {
         let mut finished = false;
         while !finished {
             match event_rx.recv_timeout(Duration::from_secs(15)) {
-                Ok(DriverEvent::UserInputRequested { request_id, questions }) => {
+                Ok(DriverEvent::UserInputRequested {
+                    request_id,
+                    questions,
+                }) => {
                     assert_eq!(questions.len(), 1);
                     assert_eq!(questions[0].options.len(), 2);
                     driver.respond_user_input(

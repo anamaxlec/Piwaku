@@ -548,6 +548,8 @@ composer.remove_followup: 从队列中移除
 user_input.confirm_ok: 确认
 user_input.confirm_cancel: 取消
 user_input.dismiss: 取消
+todo_panel.title: 任务
+todo_panel.progress: "%{completed} / %{total}"
 user_input.other_placeholder: 输入其他回答
 user_input.back: 上一步
 user_input.next: 下一步

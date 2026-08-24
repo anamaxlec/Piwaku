@@ -1737,6 +1737,11 @@ pub enum DriverEvent {
     /// deliberately separate from transcript activities: completing a turn
     /// must not make a detached process or subagent look complete.
     BackgroundWork(BackgroundWorkEvent),
+    /// PIWAKU: authoritative snapshot of the agent-owned task list (Pi's
+    /// rpiv-todo). Like background work this is session state, not turn
+    /// output — it must survive turn boundaries and never lands in the
+    /// transcript.
+    TodoStateUpdated(TodoSnapshot),
     Permission {
         request_id: String,
         title: String,
@@ -1916,6 +1921,56 @@ pub enum BackgroundWorkEvent {
         key: BackgroundWorkKey,
         message: String,
     },
+}
+
+/// PIWAKU: authoritative snapshot of the agent-owned task list, rebuilt from
+/// rpiv-todo's `todo` tool results. Every successful tool call returns the
+/// complete list, so the driver never diffs — it replaces wholesale.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoSnapshot {
+    pub tasks: Vec<TodoTask>,
+    pub next_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoTaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoTask {
+    pub id: u64,
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Present-continuous label shown while the task is in progress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_form: Option<String>,
+    pub status: TodoTaskStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<u64>,
+}
+
+impl TodoSnapshot {
+    /// Tasks the panel shows: deleted tasks are tombstones kept only for
+    /// replay compatibility.
+    pub fn visible_tasks(&self) -> impl Iterator<Item = &TodoTask> {
+        self.tasks
+            .iter()
+            .filter(|task| task.status != TodoTaskStatus::Deleted)
+    }
+
+    pub fn completed_count(&self) -> usize {
+        self.visible_tasks()
+            .filter(|task| task.status == TodoTaskStatus::Completed)
+            .count()
+    }
 }
 
 /// A slash command a live provider process advertised for its session.

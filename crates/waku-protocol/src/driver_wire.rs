@@ -55,6 +55,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::RichActivity(activity) => ("richActivity", serde_json::to_value(activity)?),
         DriverEvent::BackgroundWork(work) => ("backgroundWork", serde_json::to_value(work)?),
+        DriverEvent::TodoStateUpdated(snapshot) => {
+            ("todoStateUpdated", serde_json::to_value(snapshot)?)
+        }
         DriverEvent::Permission {
             request_id,
             title,
@@ -139,6 +142,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         }
         "richActivity" => DriverEvent::RichActivity(serde_json::from_value(payload)?),
         "backgroundWork" => DriverEvent::BackgroundWork(serde_json::from_value(payload)?),
+        "todoStateUpdated" => DriverEvent::TodoStateUpdated(serde_json::from_value(payload)?),
         "permission" => {
             let permission: PermissionWire = serde_json::from_value(payload)?;
             DriverEvent::Permission {
