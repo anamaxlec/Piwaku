@@ -574,6 +574,9 @@ goal.usage_tokens_unbudgeted: "%{used} トークン"
 composer.edit_in_composer: 入力欄で編集
 composer.steer: 指示を追加
 composer.remove_followup: キューから削除
+user_input.confirm_ok: 確認
+user_input.confirm_cancel: キャンセル
+user_input.dismiss: キャンセル
 user_input.other_placeholder: 別の回答を入力
 user_input.back: 戻る
 user_input.next: 次へ
@@ -678,6 +681,7 @@ errors.provider_no_active_turn: "%{provider} には指示を追加できる実�
 errors.provider_transport_write: "%{provider} の通信への書き込みに失敗しました：%{error}"
 errors.provider_transport_write_short: "%{provider} の通信への書き込みに失敗しました"
 errors.provider_transport_read: "%{provider} の通信の読み込みに失敗しました：%{error}"
+errors.provider_stdout_noise: "%{provider} が制御ストリームに非JSON出力を書き込みました（通常は拡張機能のconsole.logが原因）。セッションは中断されません。最初の行: %{snippet}"
 errors.provider_invalid_json: "%{provider} から無効な JSON が送信されました：%{error}"
 errors.provider_exited: "%{provider} が %{status} で終了しました"
 errors.provider_rpc_exited: "%{provider} RPC が %{status} で終了しました"

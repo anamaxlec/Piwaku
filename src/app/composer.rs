@@ -221,6 +221,39 @@ impl Waku {
             format!("user-input-{request_id}-{question_index}-continue"),
             cx,
         );
+        // PIWAKU: decline the whole request without answering — providers
+        // resolve the underlying dialog as dismissed and the turn continues.
+        let dismiss_focus = self.transcript_control_focus(
+            format!("user-input-{request_id}-{question_index}-dismiss"),
+            cx,
+        );
+        let dismiss = div()
+            .id(SharedString::from(format!(
+                "user-input-{request_id}-{question_index}-dismiss"
+            )))
+            .track_focus(&dismiss_focus)
+            .tab_index(0)
+            .tab_stop(true)
+            .h(px(26.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text_tertiary)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
+            .active(|style| style.opacity(0.8))
+            .child(tr!("user_input.dismiss"))
+            .on_click(cx.listener(|this, _, _, cx| this.dismiss_user_input(cx)))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.dismiss_user_input(cx);
+                    cx.stop_propagation();
+                }
+            }));
         let back = (question_index > 0).then(|| {
             let focus = self.transcript_control_focus(
                 format!("user-input-{request_id}-{question_index}-back"),
@@ -400,6 +433,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .children(back)
+                        .child(dismiss)
                         .child(div().flex_1())
                         .child(continue_button),
                 ),

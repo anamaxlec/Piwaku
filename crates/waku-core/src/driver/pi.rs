@@ -19,11 +19,13 @@ use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use super::{activity, computer_use as computer_use_runtime};
+use super::{activity, computer_use as computer_use_runtime, pi_extensions};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
-use crate::model::{ActivityKind, DriverEvent, InteractionMode, ProviderResumeCursor, RuntimeMode};
+use crate::model::{
+    ActivityKind, DriverEvent, InteractionMode, ProviderResumeCursor, RuntimeMode, UserInputAnswer,
+};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -148,6 +150,12 @@ enum CommandMessage {
     Steer(String),
     Cancel,
     CancelExtensionRequest(String),
+    /// A fully-built `extension_ui_response` frame for a dialog the native
+    /// question panel already answered. Prebuilt so the writer thread stays
+    /// free of answer-interpretation logic.
+    RespondExtensionUi {
+        payload: Value,
+    },
     Options(SessionOptions),
     Rollback {
         turns: usize,
@@ -162,9 +170,32 @@ enum CommandMessage {
 
 type PendingResponses = Arc<Mutex<HashMap<String, Sender<Result<Value, String>>>>>;
 
+/// Extension dialog requests awaiting an answer from the native question
+/// panel. The reader thread inserts on `extension_ui_request`; answering
+/// (or turn teardown) removes. Shared between reader and command threads.
+type PendingExtensionUiRequests = Arc<Mutex<HashMap<String, pi_extensions::PendingExtensionUi>>>;
+
+/// Non-JSON lines observed on the provider's stdout. Extensions run in-process
+/// and share its stdout, so any stray `console.log` surfaces here; captured and
+/// counted instead of surfaced per line.
+#[derive(Default)]
+struct StdoutChatter {
+    count: u64,
+    last: Option<String>,
+}
+
+impl StdoutChatter {
+    fn record(&mut self, line: &str) {
+        self.count += 1;
+        let truncated: String = line.trim().chars().take(200).collect();
+        self.last = Some(truncated);
+    }
+}
+
 pub struct PiDriver {
     flavor: PiFlavor,
     commands: Sender<CommandMessage>,
+    pending_extension_ui: PendingExtensionUiRequests,
     computer_use: Option<computer_use_runtime::ComputerUseRuntime>,
 }
 
@@ -275,8 +306,14 @@ impl PiDriver {
             .ok_or_else(|| anyhow!("{} stderr unavailable", flavor.display_name()))?;
 
         let (commands, command_rx) = unbounded();
+        let pending_extension_ui: PendingExtensionUiRequests = Arc::new(Mutex::new(HashMap::new()));
+        let waiter_extension_ui = pending_extension_ui.clone();
+        let stdout_chatter = Arc::new(Mutex::new(StdoutChatter::default()));
+        let reader_chatter = stdout_chatter.clone();
+        let waiter_chatter = stdout_chatter.clone();
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let reader_pending = pending.clone();
+        let reader_extension_ui = pending_extension_ui.clone();
         let reader_commands = commands.clone();
         let reader_events = events.clone();
         let reader_thread =
@@ -299,6 +336,7 @@ impl PiDriver {
                                                 flavor,
                                                 value,
                                                 &reader_pending,
+                                                &reader_extension_ui,
                                                 &reader_commands,
                                                 &reader_events,
                                                 &mut stream_state,
@@ -314,12 +352,25 @@ impl PiDriver {
                                             }
                                         }
                                     }
-                                    Err(error) => {
-                                        let _ = reader_events.send(DriverEvent::Error(tr!(
-                                            "errors.provider_invalid_json",
-                                            provider = flavor.display_name(),
-                                            error = error
-                                        )));
+                                    Err(_) => {
+                                        // PIWAKU: extensions share the
+                                        // process's stdout, so one stray
+                                        // `console.log` anywhere lands on the
+                                        // RPC stream. That is chatter, not a
+                                        // protocol failure — it never breaks
+                                        // the turn — so announce it once with
+                                        // the offending snippet instead of
+                                        // spamming an error per line.
+                                        let mut chatter = reader_chatter.lock();
+                                        chatter.record(&line);
+                                        if chatter.count == 1 {
+                                            let snippet = chatter.last.clone().unwrap_or_default();
+                                            let _ = reader_events.send(DriverEvent::Error(tr!(
+                                                "errors.provider_stdout_noise",
+                                                provider = flavor.display_name(),
+                                                snippet = snippet
+                                            )));
+                                        }
                                     }
                                 }
                             }
@@ -615,6 +666,11 @@ impl PiDriver {
                                 break;
                             }
                         }
+                        CommandMessage::RespondExtensionUi { payload } => {
+                            if write_json_line(&mut stdin, &payload).is_err() {
+                                break;
+                            }
+                        }
                         CommandMessage::Rollback { turns, response } => {
                             let result = fork_pi_session(
                                 flavor,
@@ -679,13 +735,24 @@ impl PiDriver {
                 let status = child.wait();
                 let _ = reader_thread.join();
                 let _ = stderr_thread.join();
+                // Any dialog still pending can never be answered now.
+                waiter_extension_ui.lock().clear();
+                let chatter_count = waiter_chatter.lock().count;
                 match status {
                     Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                        let mut message = tr!(
                             "errors.provider_rpc_exited",
                             provider = flavor.display_name(),
                             status = status
-                        )));
+                        );
+                        if chatter_count > 0 {
+                            // PIWAKU: unclean exits are easier to diagnose
+                            // when the captured stdout chatter is mentioned.
+                            message.push_str(&format!(
+                                " (also saw {chatter_count} non-JSON stdout line(s))"
+                            ));
+                        }
+                        let _ = events.send(DriverEvent::Error(message));
                     }
                     Err(error) => {
                         let _ = events.send(DriverEvent::Error(tr!(
@@ -702,6 +769,7 @@ impl PiDriver {
         Ok(Self {
             flavor,
             commands,
+            pending_extension_ui,
             computer_use,
         })
     }
@@ -731,6 +799,43 @@ impl DriverControl for PiDriver {
     }
 
     fn respond(&self, _request_id: String, _option_id: String) {}
+
+    /// Answer an extension dialog from the native question panel. The request
+    /// must still be pending; a stale id (already answered, turn settled, or
+    /// process gone) is dropped silently — Pi ignores responses for unknown
+    /// ids anyway.
+    fn respond_user_input(&self, request_id: String, answers: Vec<UserInputAnswer>) {
+        let payload = {
+            let mut pending = self.pending_extension_ui.lock();
+            let Some(record) = pending.remove(&request_id) else {
+                return;
+            };
+            match record.build_response(&answers) {
+                Some(payload) => payload,
+                None => return,
+            }
+        };
+        let _ = self
+            .commands
+            .send(CommandMessage::RespondExtensionUi { payload });
+    }
+
+    /// Decline the dialog: Pi resolves the extension's promise with
+    /// `cancelled`, which extensions treat as an explicit user decline (e.g.
+    /// ask_user_question's DECLINE envelope) rather than an error.
+    fn cancel_user_input(&self, request_id: String) {
+        if self
+            .pending_extension_ui
+            .lock()
+            .remove(&request_id)
+            .is_none()
+        {
+            return;
+        }
+        let _ = self
+            .commands
+            .send(CommandMessage::CancelExtensionRequest(request_id));
+    }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
         // Both flavors have setters for the model and thinking level, so those
@@ -1194,7 +1299,10 @@ fn handle_pi_message(
     flavor: PiFlavor,
     value: Value,
     pending: &PendingResponses,
-    commands: &Sender<CommandMessage>,
+    pending_extension_ui: &PendingExtensionUiRequests,
+    // Unused since extension dialogs stopped being auto-cancelled here; the
+    // ask_user_question interception adapter will send through it again.
+    _commands: &Sender<CommandMessage>,
     events: &impl DriverEventSink,
     state: &mut PiStreamState,
 ) {
@@ -1252,6 +1360,9 @@ fn handle_pi_message(
                 }),
             });
         }
+        // Dialogs never outlive the turn that opened them; Pi aborts their
+        // tool calls on settle, so any leftover entry is stale.
+        pending_extension_ui.lock().clear();
         *state = PiStreamState::default();
         return;
     }
@@ -1378,15 +1489,22 @@ fn handle_pi_message(
                 let _ = events.send(DriverEvent::Error(message));
             }
         }
-        "extension_ui_request" => {
-            let method = value.get("method").and_then(Value::as_str);
-            let id = value.get("id").and_then(Value::as_str);
-            if matches!(method, Some("select" | "confirm" | "input" | "editor"))
-                && let Some(id) = id
-            {
-                let _ = commands.send(CommandMessage::CancelExtensionRequest(id.to_owned()));
+        "extension_ui_request" => match pi_extensions::parse_extension_ui_request(&value) {
+            Some(parsed) => {
+                // PIWAKU: route extension dialogs to the native question
+                // panel instead of auto-cancelling them. Fire-and-forget and
+                // unknown methods return None here and are ignored, which
+                // keeps unsupported extensions from crashing the runtime.
+                pending_extension_ui
+                    .lock()
+                    .insert(parsed.id.clone(), parsed.pending);
+                let _ = events.send(DriverEvent::UserInputRequested {
+                    request_id: parsed.id,
+                    questions: parsed.questions,
+                });
             }
-        }
+            None => {}
+        },
         "extension_error" => {
             let _ = events.send(DriverEvent::Error(pi_error_message(flavor, &value)));
         }
@@ -1484,6 +1602,12 @@ mod tests {
         )
     }
 
+    /// Fresh extension-dialog registry for tests that don't exercise the
+    /// dialog bridge.
+    fn no_extension_ui() -> PendingExtensionUiRequests {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
     /// Drives the installed Pi RPC through one real provider turn. Ignored by
     /// default because it needs the CLI, credentials, and network access.
     #[test]
@@ -1557,6 +1681,7 @@ mod tests {
         let driver = PiDriver {
             flavor: PiFlavor::Pi,
             commands,
+            pending_extension_ui: no_extension_ui(),
             computer_use: None,
         };
         let options = |mode, interaction_mode| SessionOptions {
@@ -1689,6 +1814,7 @@ mod tests {
                 PiFlavor::Pi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
@@ -1843,6 +1969,7 @@ mod tests {
                 PiFlavor::OhMyPi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
@@ -1879,7 +2006,15 @@ mod tests {
                 json!({"type": "session_info_update", "title": "Oh My Pi's spelling"}),
             ),
         ] {
-            handle_pi_message(flavor, value, &pending, &commands, &events, &mut state);
+            handle_pi_message(
+                flavor,
+                value,
+                &pending,
+                &no_extension_ui(),
+                &commands,
+                &events,
+                &mut state,
+            );
         }
 
         assert!(matches!(event_rx.recv().unwrap(), DriverEvent::TurnStarted));
@@ -1894,6 +2029,7 @@ mod tests {
             PiFlavor::OhMyPi,
             json!({"type": "session_info_update", "title": "Named by Oh My Pi"}),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
@@ -1952,6 +2088,7 @@ mod tests {
             PiFlavor::Pi,
             json!({"type": "session_info_changed", "name": "Named by Pi"}),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
@@ -1965,6 +2102,7 @@ mod tests {
             PiFlavor::Pi,
             json!({"type": "session_info_changed", "name": null}),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
@@ -1989,6 +2127,7 @@ mod tests {
                 }
             }),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
@@ -2014,6 +2153,7 @@ mod tests {
                 }
             }),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
@@ -2050,6 +2190,7 @@ mod tests {
                 }
             }),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
@@ -2104,6 +2245,7 @@ mod tests {
                 PiFlavor::Pi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
@@ -2144,6 +2286,7 @@ mod tests {
                 PiFlavor::Pi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,

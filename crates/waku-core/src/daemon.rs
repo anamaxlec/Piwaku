@@ -1505,6 +1505,7 @@ fn handle_driver_command(
             answers,
         } => driver.respond_user_input(request_id, answers),
         Command::Goal { operation } => driver.goal(operation),
+        Command::CancelUserInput { request_id } => driver.cancel_user_input(request_id),
         Command::RunComputerTool { request } => {
             driver.run_computer_tool(crate::computer_use::ComputerToolRequest {
                 call_id: request.call_id,

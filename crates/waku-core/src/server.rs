@@ -682,6 +682,7 @@ fn command_targets_runtime(command: &Command) -> bool {
             | Command::StopBackgroundWork { .. }
             | Command::Respond { .. }
             | Command::RespondUserInput { .. }
+            | Command::CancelUserInput { .. }
             | Command::RunComputerTool { .. }
             | Command::RejectComputerTool { .. }
             | Command::ApplyOptions { .. }

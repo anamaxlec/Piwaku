@@ -1121,6 +1121,18 @@ composer.remove_followup:
   en: Remove from queue
 composer.queued_message_actions:
   en: Follow-up actions
+user_input.confirm_ok:
+  en: Confirm
+  ja: 確認
+  zh-CN: 确认
+user_input.confirm_cancel:
+  en: Cancel
+  ja: キャンセル
+  zh-CN: 取消
+user_input.dismiss:
+  en: Cancel
+  ja: キャンセル
+  zh-CN: 取消
 user_input.other_placeholder:
   en: Type another answer
 user_input.back:
@@ -1321,6 +1333,8 @@ errors.provider_transport_write_short:
   en: "%{provider} transport write failed"
 errors.provider_transport_read:
   en: "%{provider} transport read failed: %{error}"
+errors.provider_stdout_noise:
+  en: "%{provider} wrote non-JSON output on its control stream - usually an extension printing with console.log. This does not interrupt the session. First offending line: %{snippet}"
 errors.provider_invalid_json:
   en: "%{provider} sent invalid JSON: %{error}"
 errors.provider_exited:

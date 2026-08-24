@@ -112,6 +112,13 @@ pub enum Command {
     Goal {
         operation: GoalOperation,
     },
+    /// Decline a structured-question request without answering it. Providers
+    /// treat this as "the user dismissed the dialog": Pi extensions resolve
+    /// their cancelled promise, while an unanswered request would just stall
+    /// the turn.
+    CancelUserInput {
+        request_id: String,
+    },
     RunComputerTool {
         request: WireComputerToolRequest,
     },

@@ -1472,6 +1472,29 @@ impl Waku {
         cx.notify();
     }
 
+    /// PIWAKU: decline a pending structured-question request without
+    /// answering it. Providers resolve the underlying dialog as dismissed —
+    /// Pi extensions treat that as an explicit decline (e.g. ask_user_question
+    /// emits its DECLINE envelope) and keep the turn going.
+    pub(super) fn dismiss_user_input(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            return;
+        };
+        let Some(pending) = runtime.pending_user_input.take() else {
+            return;
+        };
+        runtime.driver.cancel_user_input(pending.request_id);
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.status = SessionStatus::Working;
+        }
+        self.user_input_answer
+            .update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+    }
+
     pub(super) fn respond_computer_permission(
         &mut self,
         decision: &'static str,

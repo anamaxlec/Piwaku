@@ -545,6 +545,9 @@ goal.usage_tokens_unbudgeted: "%{used} 个 token"
 composer.edit_in_composer: 在输入框中编辑
 composer.steer: 引导
 composer.remove_followup: 从队列中移除
+user_input.confirm_ok: 确认
+user_input.confirm_cancel: 取消
+user_input.dismiss: 取消
 user_input.other_placeholder: 输入其他回答
 user_input.back: 上一步
 user_input.next: 下一步
@@ -643,6 +646,7 @@ errors.provider_no_active_turn: "%{provider} 当前没有可补充指示的任�
 errors.provider_transport_write: "%{provider} 通信写入失败：%{error}"
 errors.provider_transport_write_short: "%{provider} 通信写入失败"
 errors.provider_transport_read: "%{provider} 通信读取失败：%{error}"
+errors.provider_stdout_noise: "%{provider} 在控制流上输出了非 JSON 内容——通常是某个扩展在用 console.log。会话不受影响。首行内容：%{snippet}"
 errors.provider_invalid_json: "%{provider} 发来了无效的 JSON：%{error}"
 errors.provider_exited: "%{provider} 已退出（%{status}）"
 errors.provider_rpc_exited: "%{provider} RPC 已退出（%{status}）"
