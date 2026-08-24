@@ -87,8 +87,8 @@ impl Waku {
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.composer)
-                    .px(px(12.0))
-                    .py(px(8.0))
+                    .px(px(6.0))
+                    .py(px(6.0))
                     .child(header)
                     .child(body),
             ),
