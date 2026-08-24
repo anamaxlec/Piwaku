@@ -65,14 +65,16 @@ impl PendingExtensionUi {
         (!trimmed.is_empty()).then_some(trimmed)
     }
 
-    /// Build the `extension_ui_response` payload for this request. Returns
-    /// `None` when the answer shape cannot be interpreted, which callers treat
-    /// as "leave the request unanswered" rather than sending a corrupt frame.
-    pub(crate) fn build_response(&self, answers: &[UserInputAnswer]) -> Option<Value> {
+    /// Build the complete `extension_ui_response` frame for this request.
+    /// Returns `None` when the answer shape cannot be interpreted, which
+    /// callers treat as "leave the request unanswered" rather than sending a
+    /// corrupt frame. Pi routes inbound lines by `type` and resolves the
+    /// pending promise by `id`, so both ride on every frame.
+    pub(crate) fn build_response(&self, request_id: &str, answers: &[UserInputAnswer]) -> Option<Value> {
         if Self::is_cancelled(answers) {
-            return Some(json!({ "cancelled": true }));
+            return Some(self.frame(request_id, json!({ "cancelled": true })));
         }
-        let response = match self.method {
+        let fields = match self.method {
             // Pi's select returns the chosen string verbatim; hosts echoing a
             // string outside the offered list are indistinguishable from a
             // dismissal on the extension side, so passing custom text through
@@ -86,7 +88,15 @@ impl PendingExtensionUi {
                 json!({ "confirmed": confirmed })
             }
         };
-        Some(response)
+        Some(self.frame(request_id, fields))
+    }
+
+    fn frame(&self, request_id: &str, mut fields: Value) -> Value {
+        if let Some(object) = fields.as_object_mut() {
+            object.insert("type".to_owned(), json!("extension_ui_response"));
+            object.insert("id".to_owned(), json!(request_id));
+        }
+        fields
     }
 }
 
@@ -275,11 +285,17 @@ mod tests {
             method: ExtensionUiMethod::Select,
             option_labels: vec!["1. Alpha — a".into(), "2. Beta — b".into()],
         };
-        let response = pending.build_response(&answers(&["1. Alpha — a"])).unwrap();
-        assert_eq!(response, json!({ "value": "1. Alpha — a" }));
+        let response = pending.build_response("req-9", &answers(&["1. Alpha — a"])).unwrap();
+        assert_eq!(
+            response,
+            json!({ "type": "extension_ui_response", "id": "req-9", "value": "1. Alpha — a" })
+        );
 
-        let cancelled = pending.build_response(&answers(&[])).unwrap();
-        assert_eq!(cancelled, json!({ "cancelled": true }));
+        let cancelled = pending.build_response("req-9", &answers(&[])).unwrap();
+        assert_eq!(
+            cancelled,
+            json!({ "type": "extension_ui_response", "id": "req-9", "cancelled": true })
+        );
     }
 
     #[test]
@@ -289,12 +305,12 @@ mod tests {
             option_labels: vec!["确认".into(), "取消".into()],
         };
         assert_eq!(
-            pending.build_response(&answers(&["确认"])).unwrap(),
-            json!({ "confirmed": true })
+            pending.build_response("c1", &answers(&["确认"])).unwrap(),
+            json!({ "type": "extension_ui_response", "id": "c1", "confirmed": true })
         );
         assert_eq!(
-            pending.build_response(&answers(&["取消"])).unwrap(),
-            json!({ "confirmed": false })
+            pending.build_response("c1", &answers(&["取消"])).unwrap(),
+            json!({ "type": "extension_ui_response", "id": "c1", "confirmed": false })
         );
     }
 
@@ -305,12 +321,12 @@ mod tests {
             option_labels: Vec::new(),
         };
         assert_eq!(
-            pending.build_response(&answers(&["  "])).unwrap(),
-            json!({ "cancelled": true })
+            pending.build_response("i1", &answers(&["  "])).unwrap(),
+            json!({ "type": "extension_ui_response", "id": "i1", "cancelled": true })
         );
         assert_eq!(
-            pending.build_response(&answers(&["typed answer"])).unwrap(),
-            json!({ "value": "typed answer" })
+            pending.build_response("i1", &answers(&["typed answer"])).unwrap(),
+            json!({ "type": "extension_ui_response", "id": "i1", "value": "typed answer" })
         );
     }
 }

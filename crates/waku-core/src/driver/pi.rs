@@ -810,7 +810,7 @@ impl DriverControl for PiDriver {
             let Some(record) = pending.remove(&request_id) else {
                 return;
             };
-            match record.build_response(&answers) {
+            match record.build_response(&request_id, &answers) {
                 Some(payload) => payload,
                 None => return,
             }
@@ -2299,5 +2299,115 @@ mod tests {
             event_rx.recv().unwrap(),
             DriverEvent::TurnFinished { success: true, .. }
         ));
+    }
+
+    /// PIWAKU: drives the full extension-dialog round trip against a fake RPC
+    /// process — request normalization out, panel answer back as the exact
+    /// `extension_ui_response` frame. Ignored because it spawns a local
+    /// fixture script; run with `cargo test -p waku-core -- --ignored`.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "spawns a local fake pi process"]
+    fn extension_dialog_round_trip_against_a_fake_rpc_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = std::env::temp_dir().join("piwaku-fake-pi-test.mjs");
+        std::fs::write(
+            &fixture,
+            r#"#!/usr/bin/env node
+import fs from "node:fs";
+let buf = "";
+function out(o) { process.stdout.write(JSON.stringify(o) + "\n"); }
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let i;
+  while ((i = buf.indexOf("\n")) >= 0) {
+    const line = buf.slice(0, i).trim();
+    buf = buf.slice(i + 1);
+    if (!line) continue;
+    let m; try { m = JSON.parse(line); } catch { continue; }
+    fs.appendFileSync('/tmp/piwaku-fake-received.log', JSON.stringify(m) + '\n');
+    if (m.type === "extension_ui_response") {
+      const ok = m.value === "1. Alpha \u2014 a";
+      process.stderr.write(ok ? "FAKEPI ok\n" : `FAKEPI error mismatch: ${JSON.stringify(m)}\n`);
+      out({ type: "agent_start" });
+      out({ type: "agent_settled" });
+      setTimeout(() => process.exit(ok ? 0 : 2), 150);
+    } else if (m.type === "prompt") {
+      out({ type: "response", id: m.id ?? "x", success: true });
+      out({ type: "extension_ui_request", id: "t-1", method: "select", title: "Pick", options: ["1. Alpha \u2014 a", "2. Beta \u2014 b"] });
+    } else if (m.type && m.type !== "abort") {
+      out({ type: "response", id: m.id ?? "x", success: true, data: { model: "test/model", sessionId: "s", sessionFile: "/tmp/fake-pi-session.jsonl" } });
+    }
+  }
+});
+"#,
+        )
+        .expect("write fixture");
+        std::fs::set_permissions(&fixture, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod fixture");
+
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = PiDriver::start(
+            PiFlavor::Pi,
+            DriverStartOptions {
+                binary: fixture.clone(),
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                interaction_mode: InteractionMode::Build,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("fake Pi session should start");
+
+        // Handshake completes on its own; kick a turn.
+        loop {
+            match event_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::Connected { .. }) => {
+                    driver.prompt("go".into());
+                    break;
+                }
+                Ok(DriverEvent::Error(error)) => panic!("fixture failed to initialize: {error}"),
+                Err(_) => panic!("timed out waiting for handshake"),
+                _ => {}
+            }
+        }
+
+        let mut answered_request_id = None;
+        let mut finished = false;
+        while !finished {
+            match event_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::UserInputRequested { request_id, questions }) => {
+                    assert_eq!(questions.len(), 1);
+                    assert_eq!(questions[0].options.len(), 2);
+                    driver.respond_user_input(
+                        request_id.clone(),
+                        vec![UserInputAnswer {
+                            question_id: request_id.clone(),
+                            answers: vec!["1. Alpha \u{2014} a".to_owned()],
+                        }],
+                    );
+                    answered_request_id = Some(request_id);
+                }
+                Ok(DriverEvent::TurnFinished { success: true, .. }) => {
+                    finished = true;
+                }
+                Ok(DriverEvent::Error(error)) => {
+                    panic!("dialog round trip surfaced an error: {error}");
+                }
+                Err(_) => panic!("timed out mid dialog; answered={answered_request_id:?}"),
+                _ => {}
+            }
+        }
+        assert_eq!(answered_request_id.as_deref(), Some("t-1"));
+        let _ = std::fs::remove_file(&fixture);
     }
 }
