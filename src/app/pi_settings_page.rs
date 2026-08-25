@@ -63,6 +63,7 @@ impl Waku {
         let generation = self.pi_extensions_generation;
         let projects = self.skill_scan_projects();
         let daemon = self.daemon.client();
+        eprintln!("[pi-ext] requesting inventory ({} projects)", projects.len());
         cx.spawn(async move |this, cx| {
             let extensions = cx
                 .background_executor()
@@ -71,13 +72,27 @@ impl Waku {
                         Uuid::nil(),
                         Uuid::nil(),
                         waku_client::Command::LoadPiExtensions { projects },
-                    )? {
-                        waku_client::ResponsePayload::PiExtensions { extensions } => Ok(extensions),
-                        _ => anyhow::bail!("the daemon returned an invalid pi extensions response"),
+                    ) {
+                        Ok(waku_client::ResponsePayload::PiExtensions { extensions }) => {
+                            eprintln!("[pi-ext] inventory arrived: {} packages", extensions.len());
+                            Ok(extensions)
+                        }
+                        Ok(_) => {
+                            eprintln!("[pi-ext] daemon returned an unexpected payload");
+                            anyhow::bail!("the daemon returned an invalid pi extensions response")
+                        }
+                        Err(error) => {
+                            eprintln!("[pi-ext] request failed: {error:#}");
+                            Err(error)
+                        }
                     }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                eprintln!(
+                    "[pi-ext] applying result (generation {}/{})",
+                    this.pi_extensions_generation, generation
+                );
                 if this.pi_extensions_generation != generation {
                     return;
                 }
