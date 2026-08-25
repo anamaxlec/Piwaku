@@ -154,6 +154,13 @@ impl Waku {
                     if item.reasoning.is_some() {
                         activity.reasoning = item.reasoning;
                     }
+                    // PIWAKU: live progress replaces in place; completion
+                    // clears it so the row converges to its settled look.
+                    if item.complete {
+                        activity.progress = None;
+                    } else if item.progress.is_some() {
+                        activity.progress = item.progress;
+                    }
                     session.updated_at = unix_time();
                     runtime.stream_phase = Some(StreamPhase::Activity);
                     if replaces_changes {

@@ -19,7 +19,9 @@ use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use super::{activity, computer_use as computer_use_runtime, pi_extensions};
+use super::{
+    activity, computer_use as computer_use_runtime, pi_extensions, tool_progress,
+};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -1468,7 +1470,7 @@ fn handle_pi_message(
             {
                 let _ = events.send(DriverEvent::TodoStateUpdated(snapshot));
             }
-            let item = activity::tool_activity(
+            let mut item = activity::tool_activity(
                 id.clone(),
                 kind,
                 title,
@@ -1478,6 +1480,14 @@ fn handle_pi_message(
                 failed,
                 complete,
             );
+            // PIWAKU: structured progress from provider-native update
+            // payloads (pi-web-access first); completion clears it so the
+            // row converges to its settled appearance.
+            if !complete
+                && let Some(progress) = tool_progress::extract_progress(tool_name, arguments, output)
+            {
+                item = item.with_progress(progress);
+            }
             let _ = events.send(DriverEvent::RichActivity(item));
             if complete && let Some(id) = id {
                 state.tools.remove(&id);

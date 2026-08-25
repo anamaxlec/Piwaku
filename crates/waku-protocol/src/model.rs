@@ -2096,7 +2096,7 @@ impl ActivityFileChange {
 /// adapters from provider-native update payloads. UI layers never parse
 /// provider JSON — they render this. `fraction` is present only when the
 /// provider reports a real ratio; absent means indeterminate, never a guess.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
