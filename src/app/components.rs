@@ -1170,6 +1170,47 @@ pub(super) fn activity_action_label(activity: &ActivityItem) -> String {
     }
 }
 
+/// PIWAKU: live status line for an in-flight tool with progress — the
+/// current query when one is streaming, else the localized phase label.
+/// `None` when the row is settled or carries no progress.
+pub(super) fn activity_progress_status(activity: &ActivityItem) -> Option<String> {
+    let progress = activity.progress.as_ref()?;
+    if activity.complete {
+        return None;
+    }
+    if let Some(status) = progress
+        .status_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+    {
+        return Some(status.to_owned());
+    }
+    let phase = progress.phase.as_deref()?;
+    Some(match phase {
+        "search" | "searching" => tr!("activity.progress.searching"),
+        "curating" | "curator-fallback" => tr!("activity.progress.curating"),
+        "generating-summary" => tr!("activity.progress.generating_summary"),
+        "waiting-for-approval" => tr!("activity.progress.waiting_approval"),
+        "fetch" => tr!("activity.progress.fetching"),
+        other => other.to_owned(),
+    })
+}
+
+/// PIWAKU: thin determinate bar for tools reporting a real fraction.
+pub(super) fn activity_progress_bar(fraction: f32, theme: &Theme) -> AnyElement {
+    let fraction = fraction.clamp(0.0, 1.0);
+    div()
+        .flex_none()
+        .w(px(52.0))
+        .h(px(3.0))
+        .rounded_full()
+        .bg(theme.overlay)
+        .overflow_hidden()
+        .child(div().w(gpui::relative(fraction)).h_full().bg(theme.accent))
+        .into_any_element()
+}
+
 pub(super) fn activity_row_detail(activity: &ActivityItem, reasoning_live: bool) -> String {
     use crate::model::ActivityKind;
 

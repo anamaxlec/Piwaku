@@ -1948,6 +1948,18 @@ impl Waku {
             if row_detail.trim().is_empty() {
                 row_detail = preview;
             }
+            // PIWAKU: live progress wins over the static detail — the row
+            // shows the query streaming right now and, when the provider
+            // reports a real ratio, a thin determinate bar.
+            let progress_status = activity_progress_status(activity);
+            if let Some(status) = progress_status {
+                row_detail = status;
+            }
+            let progress_fraction = activity
+                .progress
+                .as_ref()
+                .filter(|_| !activity.complete)
+                .and_then(|progress| progress.fraction);
             let file_change_stats = activity_file_change_stats(activity);
             // One changed file is unambiguous, so the row itself can offer to
             // open it. A change touching several names each file in the diff
@@ -2032,6 +2044,9 @@ impl Waku {
                                     .text_color(theme.text_secondary)
                                     .child(SharedString::from(row_detail)),
                             )
+                        })
+                        .when_some(progress_fraction, |row, fraction| {
+                            row.child(activity_progress_bar(fraction, theme))
                         })
                         .when_some(file_change_stats, |row, (additions, deletions)| {
                             row.child(

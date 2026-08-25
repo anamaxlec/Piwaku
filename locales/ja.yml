@@ -305,6 +305,11 @@ activity.action_think: 思考
 activity.action_run: 実行
 activity.action_edit: 編集
 activity.action_read: 読み込み
+activity.progress.searching: 検索中
+activity.progress.curating: 結果を整理中
+activity.progress.generating_summary: 要約を生成中
+activity.progress.waiting_approval: 承認待ち
+activity.progress.fetching: 取得中
 activity.action_search: 検索
 activity.action_list: 一覧
 activity.action_plan: 計画

@@ -592,6 +592,26 @@ activity.action_edit:
   en: Edit
 activity.action_read:
   en: Read
+activity.progress.searching:
+  en: Searching
+  ja: 検索中
+  zh-CN: 搜索中
+activity.progress.curating:
+  en: Curating results
+  ja: 結果を整理中
+  zh-CN: 整理结果
+activity.progress.generating_summary:
+  en: Generating summary
+  ja: 要約を生成中
+  zh-CN: 生成摘要
+activity.progress.waiting_approval:
+  en: Waiting for approval
+  ja: 承認待ち
+  zh-CN: 等待确认
+activity.progress.fetching:
+  en: Fetching
+  ja: 取得中
+  zh-CN: 抓取中
 activity.action_search:
   en: Search
 activity.action_list:

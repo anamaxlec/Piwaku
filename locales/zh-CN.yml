@@ -287,6 +287,11 @@ activity.action_think: 思考
 activity.action_run: 运行
 activity.action_edit: 编辑
 activity.action_read: 读取
+activity.progress.searching: 搜索中
+activity.progress.curating: 整理结果
+activity.progress.generating_summary: 生成摘要
+activity.progress.waiting_approval: 等待确认
+activity.progress.fetching: 抓取中
 activity.action_search: 搜索
 activity.action_list: 列出
 activity.action_plan: 计划
