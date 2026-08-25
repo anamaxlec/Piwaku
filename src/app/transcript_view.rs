@@ -1980,12 +1980,23 @@ impl Waku {
                 .is_some_and(|reasoning| !reasoning.content.trim().is_empty())
                 || !sections.is_empty()
                 || shows_diff;
+            // PIWAKU: tools with live progress (web search, fetch) stream
+            // their partial output open — the same default the reasoning
+            // block gets — and fold back to the settled row on completion.
+            // Expansion waits for the first streamed text so the row never
+            // flashes an arguments-only body.
+            let live_tool_output = !activity.complete
+                && activity.progress.is_some()
+                && activity
+                    .output
+                    .as_deref()
+                    .is_some_and(|output| !output.trim().is_empty());
             let item_expanded = has_detail
                 && self
                     .expanded_activity_items
                     .get(&id)
                     .copied()
-                    .unwrap_or(reasoning_live);
+                    .unwrap_or(reasoning_live || live_tool_output);
             let item_focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
             let mut item = div()
                 .w_full()
