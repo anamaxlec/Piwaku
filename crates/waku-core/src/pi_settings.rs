@@ -19,6 +19,32 @@ fn agent_dir(home: &Path) -> PathBuf {
     home.join(".pi").join("agent")
 }
 
+/// Piwaku's own record of packages disabled through the extensions manager.
+/// pi's settings have no whole-package disabled flag, so disabling removes
+/// the entry from pi's `packages` array — and without this record the
+/// package would simply vanish. Daemon-local on purpose: the record must
+/// never ride through the shared DaemonSettings, which the desktop
+/// overwrites wholesale on every settings sync.
+fn disabled_record_path(home: &Path) -> PathBuf {
+    agent_dir(home).join("piwaku-disabled-packages.json")
+}
+
+fn load_disabled(home: &Path) -> Vec<String> {
+    let Ok(bytes) = fs::read(disabled_record_path(home)) else {
+        return Vec::new();
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+fn save_disabled(home: &Path, disabled: &[String]) -> anyhow::Result<()> {
+    let path = disabled_record_path(home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_vec_pretty(disabled)?)?;
+    Ok(())
+}
+
 fn user_settings_path(home: &Path) -> PathBuf {
     agent_dir(home).join("settings.json")
 }
@@ -106,11 +132,8 @@ fn store_metadata(home: &Path, source: &str) -> (Option<String>, Option<String>)
 /// Inventory installed pi packages across the global scope and the given
 /// project scopes, merged with the daemon's disabled record so disabled
 /// packages stay visible and re-enableable.
-pub fn load_extensions(
-    home: &Path,
-    projects: &[(String, PathBuf)],
-    disabled: &[String],
-) -> Vec<PiExtensionInfo> {
+pub fn load_extensions(home: &Path, projects: &[(String, PathBuf)]) -> Vec<PiExtensionInfo> {
+    let disabled = load_disabled(home);
     let mut extensions: Vec<PiExtensionInfo> = Vec::new();
     fn seen(extensions: &[PiExtensionInfo], source: &str) -> bool {
         extensions
@@ -160,7 +183,7 @@ pub fn load_extensions(
         }
     }
 
-    for source in disabled {
+    for source in &disabled {
         if seen(&extensions, source) {
             continue;
         }
@@ -190,7 +213,7 @@ pub fn load_extensions(
 fn write_packages(
     path: &Path,
     mutate: impl FnOnce(Vec<Value>) -> Option<Vec<Value>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let bytes = fs::read(path).unwrap_or_else(|_| b"{}".into());
     let mut settings: Value = serde_json::from_slice(&bytes)
         .with_context(|| format!("invalid pi settings at {}", path.display()))?;
@@ -203,7 +226,9 @@ fn write_packages(
     let entries = packages
         .as_array_mut()
         .context("pi settings packages is not an array")?;
-    let next = mutate(entries.clone()).context("no changes to write")?;
+    let Some(next) = mutate(entries.clone()) else {
+        return Ok(false);
+    };
     *entries = next;
     if object["packages"].as_array().is_some_and(Vec::is_empty) {
         object.remove("packages");
@@ -213,7 +238,7 @@ fn write_packages(
     }
     let bytes = serde_json::to_string_pretty(&settings)?;
     fs::write(path, bytes)?;
-    Ok(())
+    Ok(true)
 }
 
 /// Enable or disable one package. Disabling strips every matching entry from
@@ -247,16 +272,26 @@ pub fn set_enabled(
                 .into_iter()
                 .filter(|entry| !matches(entry))
                 .collect();
-            (next.len() != read_packages(&path).len()).then_some(next)
+            (!next.is_empty() || read_packages(&path).len() > 1).then_some(next)
         }
-    })
+    })?;
+    // The disabled record updates even when pi's settings had nothing to
+    // change — a double-disable or a manually removed package must still
+    // land in the manager's list.
+    let mut disabled = load_disabled(home);
+    if enabled {
+        disabled.retain(|entry| entry != source);
+    } else if !disabled.contains(&source.to_owned()) {
+        disabled.push(source.to_owned());
+    }
+    save_disabled(home, &disabled)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
     use serde_json::json;
+    use uuid::Uuid;
 
     struct Sandbox {
         root: PathBuf,
@@ -305,7 +340,7 @@ mod tests {
         sandbox.write_user_settings(json!(["npm:pi-demo"]));
         sandbox.install_manifest("1.2.3", "demo package");
 
-        let extensions = load_extensions(sandbox.home(), &[], &[]);
+        let extensions = load_extensions(sandbox.home(), &[]);
         assert_eq!(extensions.len(), 1);
         let extension = &extensions[0];
         assert_eq!(extension.source, "npm:pi-demo");
@@ -315,20 +350,30 @@ mod tests {
         assert!(extension.enabled);
         assert_eq!(extension.scope, PiExtensionScope::User);
 
-        // Disabled-record rows appear disabled but only while installed, and
-        // only when pi's own settings no longer list them.
+        // A disabled package stays visible (and re-enableable) while
+        // installed, once pi's own settings no longer list it.
         sandbox.write_user_settings(json!(["npm:pi-other"]));
-        let extensions = load_extensions(
+        set_enabled(
             sandbox.home(),
-            &[],
-            &["npm:pi-demo".to_string(), "npm:pi-gone".to_string()],
-        );
+            "npm:pi-demo",
+            PiExtensionScope::User,
+            None,
+            false,
+        )
+        .unwrap();
+        let extensions = load_extensions(sandbox.home(), &[]);
         assert_eq!(extensions.len(), 2);
         let demo = extensions
             .iter()
             .find(|extension| extension.source == "npm:pi-demo")
             .expect("disabled pi-demo still listed");
         assert!(!demo.enabled);
+        assert!(
+            extensions
+                .iter()
+                .find(|extension| extension.source == "npm:pi-other")
+                .is_some_and(|extension| extension.enabled)
+        );
         let _ = sandbox;
     }
 

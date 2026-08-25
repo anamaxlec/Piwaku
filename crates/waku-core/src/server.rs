@@ -1580,7 +1580,9 @@ mod tests {
         let payload = client.request(
             Uuid::nil(),
             Uuid::nil(),
-            waku_protocol::Command::LoadPiExtensions { projects: Vec::new() },
+            waku_protocol::Command::LoadPiExtensions {
+                projects: Vec::new(),
+            },
         );
         shutdown.store(true, Ordering::Release);
         let _ = server.join();

@@ -287,9 +287,8 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::LoadPiExtensions { projects } => {
-                let disabled = self.settings.get().pi_disabled_packages.clone();
                 let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
-                let extensions = crate::pi_settings::load_extensions(&home, &projects, &disabled);
+                let extensions = crate::pi_settings::load_extensions(&home, &projects);
                 Ok(ResponsePayload::PiExtensions { extensions })
             }
             Command::SetPiExtensionEnabled {
@@ -306,15 +305,6 @@ impl Backend for WakuBackend {
                     project_root.as_deref(),
                     enabled,
                 )?;
-                let mut settings = self.settings.get();
-                if enabled {
-                    settings
-                        .pi_disabled_packages
-                        .retain(|entry| entry != &source);
-                } else if !settings.pi_disabled_packages.contains(&source) {
-                    settings.pi_disabled_packages.push(source);
-                }
-                self.settings.replace(settings)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::TrashSkills { dirs } => {

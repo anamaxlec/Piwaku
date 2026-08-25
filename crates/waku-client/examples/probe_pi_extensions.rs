@@ -5,11 +5,11 @@
 //! Requires target/debug/waku-debug-daemon to exist.
 
 use std::io::{BufRead as _, BufReader};
-use waku_protocol::DAEMON_TOKEN_ENV;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 use waku_client::{Command, DaemonClient, ResponsePayload};
+use waku_protocol::DAEMON_TOKEN_ENV;
 
 fn main() -> anyhow::Result<()> {
     let daemon_bin = std::path::PathBuf::from("target/debug/waku-debug-daemon");
@@ -30,7 +30,10 @@ fn main() -> anyhow::Result<()> {
     let mut line = String::new();
     BufReader::new(stdout).read_line(&mut line)?;
     let ready: waku_client::DaemonReady = serde_json::from_str(line.trim())?;
-    eprintln!("daemon ready at {} (protocol {})", ready.address, ready.protocol_version);
+    eprintln!(
+        "daemon ready at {} (protocol {})",
+        ready.address, ready.protocol_version
+    );
 
     let client = waku_client::DaemonClient::connect(&ready.address, token)?;
     eprintln!("connected");
@@ -46,7 +49,11 @@ fn main() -> anyhow::Result<()> {
     );
     match payload? {
         ResponsePayload::PiExtensions { extensions } => {
-            eprintln!("inventory in {:?}: {} packages", started.elapsed(), extensions.len());
+            eprintln!(
+                "inventory in {:?}: {} packages",
+                started.elapsed(),
+                extensions.len()
+            );
         }
         other => anyhow::bail!("unexpected payload: {other:?}"),
     }
