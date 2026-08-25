@@ -1549,6 +1549,50 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn load_pi_extensions_responds_with_an_inventory() {
+        let root = std::env::temp_dir().join(format!("waku-pi-ext-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let payload = client.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_protocol::Command::LoadPiExtensions { projects: Vec::new() },
+        );
+        shutdown.store(true, Ordering::Release);
+        let _ = server.join();
+        let extensions = match payload.expect("LoadPiExtensions must respond") {
+            waku_protocol::ResponsePayload::PiExtensions { extensions } => extensions,
+            other => panic!("unexpected payload: {other:?}"),
+        };
+        // Whatever this machine has installed, the response is at least well-formed.
+        let _ = extensions;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn websocket_terminal_round_trip_streams_input_and_output() {
