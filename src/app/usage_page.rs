@@ -52,6 +52,9 @@ impl Waku {
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
         }
+        if page == SettingsPage::Pi {
+            self.ensure_pi_extensions(false, cx);
+        }
         cx.notify();
     }
 

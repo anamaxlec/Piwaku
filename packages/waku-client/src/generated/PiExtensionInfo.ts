@@ -16,4 +16,8 @@ name: string, version?: string | null, description?: string | null, scope: PiExt
 /**
  * Sub-paths filtered off through the object form's "-path" entries.
  */
-filtered?: Array<string>, };
+filtered?: Array<string>,
+/**
+ * Owning project for project-scope entries; the toggle round-trips it.
+ */
+projectRoot?: string | null, };

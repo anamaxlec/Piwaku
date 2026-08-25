@@ -135,6 +135,7 @@ pub fn load_extensions(
             enabled: true,
             filtered: entry_filters(&entry),
             source,
+            project_root: None,
         });
     }
 
@@ -155,6 +156,7 @@ pub fn load_extensions(
                 enabled: true,
                 filtered: entry_filters(&entry),
                 source,
+                project_root: Some(root.clone()),
             });
         }
     }
@@ -176,6 +178,7 @@ pub fn load_extensions(
             enabled: false,
             filtered: Vec::new(),
             source: source.clone(),
+            project_root: None,
         });
     }
 

@@ -1944,6 +1944,9 @@ pub struct PiExtensionInfo {
     /// Sub-paths filtered off through the object form's "-path" entries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filtered: Vec<String>,
+    /// Owning project for project-scope entries; the toggle round-trips it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]

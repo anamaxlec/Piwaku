@@ -55,6 +55,16 @@ language.description: 选择 Waku 的界面语言
 settings.general: 通用
 settings.appearance: 外观
 settings.providers: 服务商
+settings.pi: Pi
+settings.pi_keywords: "pi 插件 扩展 包"
+pi_ext.loading: 正在读取已安装的 pi 插件…
+pi_ext.restart_note: 更改对新开的 Pi 会话生效。
+pi_ext.scope_user: 全局
+pi_ext.scope_project: 项目
+pi_ext.compat_native: 原生适配
+pi_ext.compat_replaced: "Waku 已接管"
+pi_ext.compat_tui_only: 仅 TUI
+pi_ext.compat_generic: 兼容
 settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作

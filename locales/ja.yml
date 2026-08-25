@@ -59,6 +59,16 @@ language.description: Waku 全体で使用する言語を選択します
 settings.general: 一般
 settings.appearance: 外観
 settings.providers: プロバイダー
+settings.pi: Pi
+settings.pi_keywords: "pi 拡張 プラグイン パッケージ"
+pi_ext.loading: "インストール済みPi拡張を読み込み中…"
+pi_ext.restart_note: "変更は新しいPiセッションから適用されます。"
+pi_ext.scope_user: グローバル
+pi_ext.scope_project: プロジェクト
+pi_ext.compat_native: ネイティブ
+pi_ext.compat_replaced: "Wakuが置き換え"
+pi_ext.compat_tui_only: "TUI専用"
+pi_ext.compat_generic: 互換
 settings.usage: 使用状況
 settings.daemon: デーモン
 settings.computer_use: コンピュータ操作

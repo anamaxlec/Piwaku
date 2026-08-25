@@ -114,6 +114,46 @@ settings.appearance:
   en: Appearance
 settings.providers:
   en: Providers
+settings.pi:
+  en: Pi
+  ja: Pi
+  zh-CN: Pi
+settings.pi_keywords:
+  en: pi extensions plugins packages
+  ja: pi 拡張 プラグイン パッケージ
+  zh-CN: pi 插件 扩展 包
+pi_ext.loading:
+  en: Loading installed pi extensions…
+  ja: インストール済みPi拡張を読み込み中…
+  zh-CN: 正在读取已安装的 pi 插件…
+pi_ext.restart_note:
+  en: Changes apply to new Pi sessions.
+  ja: 変更は新しいPiセッションから適用されます。
+  zh-CN: 更改对新开的 Pi 会话生效。
+pi_ext.scope_user:
+  en: Global
+  ja: グローバル
+  zh-CN: 全局
+pi_ext.scope_project:
+  en: Project
+  ja: プロジェクト
+  zh-CN: 项目
+pi_ext.compat_native:
+  en: Native
+  ja: ネイティブ
+  zh-CN: 原生适配
+pi_ext.compat_replaced:
+  en: Replaced by Waku
+  ja: Wakuが置き換え
+  zh-CN: Waku 已接管
+pi_ext.compat_tui_only:
+  en: TUI only
+  ja: TUI専用
+  zh-CN: 仅 TUI
+pi_ext.compat_generic:
+  en: Compatible
+  ja: 互換
+  zh-CN: 兼容
 settings.usage:
   en: Usage
 settings.daemon:

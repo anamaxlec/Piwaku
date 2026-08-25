@@ -216,6 +216,7 @@ enum SettingsPage {
     General,
     Providers,
     Skills,
+    Pi,
     Usage,
     Daemon,
     ComputerUse,
@@ -1413,6 +1414,10 @@ pub struct Waku {
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
+    /// PIWAKU: cached pi extension inventory for the Settings → Pi page.
+    pi_extensions: Option<Rc<Vec<crate::model::PiExtensionInfo>>>,
+    pi_extensions_pending: bool,
+    pi_extensions_generation: u64,
     /// Bumped per scan; a result from a superseded scan is discarded.
     skills_scan_generation: u64,
     skills_scan_pending: bool,
@@ -1608,6 +1613,7 @@ mod drafts;
 mod file_search;
 mod goal_dialog;
 mod image_preview;
+mod pi_settings_page;
 mod render;
 mod right_panel;
 mod runtime;
@@ -2897,6 +2903,9 @@ impl Waku {
                 scene_overlay_enabled,
                 settings_page: None,
                 skills_catalog: None,
+                pi_extensions: None,
+                pi_extensions_pending: false,
+                pi_extensions_generation: 0,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,
                 skills_scanned_at: None,
