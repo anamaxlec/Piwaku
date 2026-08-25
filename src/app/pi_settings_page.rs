@@ -77,7 +77,7 @@ impl Waku {
         let projects = self.skill_scan_projects();
         let daemon = self.daemon.client();
         trace_pi_ext(&format!("[pi-ext] requesting inventory ({} projects)", projects.len()));
-        let _ = cx.spawn(async move |this, cx| {
+        cx.spawn(async move |this, cx| {
             trace_pi_ext("[pi-ext] outer task started");
             let extensions = cx
                 .background_executor()
@@ -118,7 +118,8 @@ impl Waku {
                 }
                 cx.notify();
             });
-        });
+        })
+        .detach();
     }
 
     pub(super) fn set_pi_extension_enabled(
@@ -131,7 +132,7 @@ impl Waku {
     ) {
         self.pi_extensions_generation += 1;
         let daemon = self.daemon.client();
-        let _ = cx.spawn(async move |this, cx| {
+        cx.spawn(async move |this, cx| {
             let result = daemon
                 .request(
                     Uuid::nil(),
@@ -154,7 +155,8 @@ impl Waku {
                 this.ensure_pi_extensions(true, cx);
                 cx.notify();
             });
-        });
+        })
+        .detach();
     }
 
     // ── Page ───────────────────────────────────────────────────────────────
