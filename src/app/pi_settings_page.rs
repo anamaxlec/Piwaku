@@ -78,9 +78,11 @@ impl Waku {
         let daemon = self.daemon.client();
         trace_pi_ext(&format!("[pi-ext] requesting inventory ({} projects)", projects.len()));
         let _ = cx.spawn(async move |this, cx| {
+            trace_pi_ext("[pi-ext] outer task started");
             let extensions = cx
                 .background_executor()
                 .spawn(async move {
+                    trace_pi_ext("[pi-ext] inner task running — sending request");
                     match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
