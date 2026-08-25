@@ -65,6 +65,26 @@ fn source_name(source: &str) -> String {
         .unwrap_or_else(|| trimmed.to_owned())
 }
 
+/// The installed package directory for a settings source, under the npm
+/// store. Scoped packages keep their `@org/` directory: `npm:@a/b` resolves
+/// to `node_modules/@a/b`, not `node_modules/b`.
+fn store_dir(home: &Path, source: &str) -> PathBuf {
+    let without_transport = source
+        .split_once(':')
+        .filter(|(transport, _)| {
+            matches!(*transport, "npm" | "git" | "github")
+        })
+        .map_or(source, |(_, rest)| rest);
+    let trimmed = without_transport.trim_end_matches('/');
+    let package = if trimmed.starts_with('@') || !trimmed.contains('/') {
+        trimmed.to_owned()
+    } else {
+        // git/github sources install under their package name.
+        source_name(source)
+    };
+    agent_dir(home).join("npm").join("node_modules").join(package)
+}
+
 fn entry_source(entry: &Value) -> Option<&str> {
     match entry {
         Value::String(source) => Some(source.as_str()),
@@ -105,12 +125,7 @@ fn read_packages(path: &Path) -> Vec<Value> {
 /// Version and description from the package's installed package.json, best
 /// effort — an unreadable store still lists the package, just bare.
 fn store_metadata(home: &Path, source: &str) -> (Option<String>, Option<String>) {
-    let name = source_name(source);
-    let manifest = agent_dir(home)
-        .join("npm")
-        .join("node_modules")
-        .join(&name)
-        .join("package.json");
+    let manifest = store_dir(home, source).join("package.json");
     let Ok(bytes) = fs::read(manifest) else {
         return (None, None);
     };
@@ -260,6 +275,7 @@ pub fn set_enabled(
         }
     };
     write_packages(&path, |entries| {
+        let original_len = entries.len();
         if enabled {
             if entries.iter().any(matches) {
                 return None;
@@ -272,7 +288,9 @@ pub fn set_enabled(
                 .into_iter()
                 .filter(|entry| !matches(entry))
                 .collect();
-            (!next.is_empty() || read_packages(&path).len() > 1).then_some(next)
+            // An empty result is a legitimate write: the packages key is
+            // dropped below. Only skip when nothing was actually removed.
+            (next.len() != original_len).then_some(next)
         }
     })?;
     // The disabled record updates even when pi's settings had nothing to
@@ -374,6 +392,38 @@ mod tests {
                 .find(|extension| extension.source == "npm:pi-other")
                 .is_some_and(|extension| extension.enabled)
         );
+        let _ = sandbox;
+    }
+
+    #[test]
+    fn scoped_packages_resolve_inside_their_org_directory() {
+        let sandbox = Sandbox::new();
+        let org = sandbox
+            .root
+            .join(".pi/agent/npm/node_modules/@narumitw/pi-goal");
+        fs::create_dir_all(&org).unwrap();
+        fs::write(
+            org.join("package.json"),
+            json!({ "name": "@narumitw/pi-goal", "version": "0.53.1" }).to_string(),
+        )
+        .unwrap();
+        sandbox.write_user_settings(json!(["npm:@narumitw/pi-goal"]));
+
+        // Disabling strips the settings entry; the disabled row still
+        // resolves its manifest through the scoped directory.
+        set_enabled(
+            sandbox.home(),
+            "npm:@narumitw/pi-goal",
+            PiExtensionScope::User,
+            None,
+            false,
+        )
+        .unwrap();
+        let extensions = load_extensions(sandbox.home(), &[]);
+        assert_eq!(extensions.len(), 1);
+        assert!(!extensions[0].enabled);
+        assert_eq!(extensions[0].name, "pi-goal");
+        assert_eq!(extensions[0].version.as_deref(), Some("0.53.1"));
         let _ = sandbox;
     }
 
