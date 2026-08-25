@@ -12,19 +12,6 @@ use crate::model::PiExtensionScope;
 /// How long a cached pi extension inventory stays trusted.
 const PI_EXTENSIONS_RESCAN_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// PIWAKU: temporary file trace for the inventory load path — the app's
-/// stderr is detached under Launch Services, so terminal prints never land.
-fn trace_pi_ext(message: &str) {
-    use std::io::Write as _;
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/piwaku-pi-ext.log")
-    {
-        let _ = writeln!(file, "{message}");
-    }
-}
-
 /// Sources with a dedicated Piwaku adapter or a deliberate non-adapter
 /// stance. Anything absent renders as generic-compatible.
 fn compatibility(source: &str) -> PiCompatibility {
@@ -85,44 +72,26 @@ impl Waku {
         let generation = self.pi_extensions_generation;
         let projects = self.skill_scan_projects();
         let daemon = self.daemon.client();
-        trace_pi_ext(&format!(
-            "[pi-ext] requesting inventory ({} projects)",
-            projects.len()
-        ));
         cx.spawn(async move |this, cx| {
-            trace_pi_ext("[pi-ext] outer task started");
             let extensions = cx
                 .background_executor()
                 .spawn(async move {
-                    trace_pi_ext("[pi-ext] inner task running — sending request");
                     match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
                         waku_client::Command::LoadPiExtensions { projects },
                     ) {
                         Ok(waku_client::ResponsePayload::PiExtensions { extensions }) => {
-                            trace_pi_ext(&format!(
-                                "[pi-ext] inventory arrived: {} packages",
-                                extensions.len()
-                            ));
                             Ok(extensions)
                         }
                         Ok(_) => {
-                            trace_pi_ext("[pi-ext] daemon returned an unexpected payload");
                             anyhow::bail!("the daemon returned an invalid pi extensions response")
                         }
-                        Err(error) => {
-                            trace_pi_ext(&format!("[pi-ext] request failed: {error:#}"));
-                            Err(error)
-                        }
+                        Err(error) => Err(error),
                     }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                trace_pi_ext(&format!(
-                    "[pi-ext] applying result (generation {}/{})",
-                    this.pi_extensions_generation, generation
-                ));
                 if this.pi_extensions_generation != generation {
                     return;
                 }
