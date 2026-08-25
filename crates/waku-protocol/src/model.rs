@@ -2092,6 +2092,23 @@ impl ActivityFileChange {
     }
 }
 
+/// PIWAKU: live progress for long-running tools, extracted by driver-side
+/// adapters from provider-native update payloads. UI layers never parse
+/// provider JSON — they render this. `fraction` is present only when the
+/// provider reports a real ratio; absent means indeterminate, never a guess.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fraction: Option<f32>,
+    /// Provider-native phase slug (e.g. "searching", "generating-summary").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    /// Human-facing line under the row title, e.g. the current query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct ActivityItem {
     pub id: Uuid,
@@ -2130,6 +2147,10 @@ pub struct ActivityItem {
     /// activity fields and leave this empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningBlock>,
+    /// PIWAKU: live tool progress; cleared when the activity completes so the
+    /// row converges to its ordinary settled appearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ActivityProgress>,
 }
 
 impl ActivityItem {
@@ -2157,6 +2178,7 @@ impl ActivityItem {
             display_target,
             display_description: None,
             reasoning: None,
+            progress: None,
         }
     }
 
@@ -2193,6 +2215,12 @@ impl ActivityItem {
 
     pub fn with_failed(mut self, failed: bool) -> Self {
         self.failed = failed;
+        self
+    }
+
+    /// PIWAKU: attach live tool progress to an activity row.
+    pub fn with_progress(mut self, progress: ActivityProgress) -> Self {
+        self.progress = Some(progress);
         self
     }
 
