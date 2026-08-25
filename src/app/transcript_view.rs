@@ -385,7 +385,7 @@ impl Waku {
     /// the layout walks backwards from there, so the last row's bottom stays
     /// against the viewport as that row grows. The flag alone only re-pins in
     /// the phase where the anchor's end space has already collapsed to zero.
-    fn pin_transcript_to_tail(&self) {
+    pub(super) fn pin_transcript_to_tail(&self) {
         self.transcript_anchor_following
             .set(self.transcript_anchor.get().is_some());
         self.active_transcript_rows().scroll_to_end();

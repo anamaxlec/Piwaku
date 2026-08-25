@@ -27,8 +27,12 @@ impl Waku {
             .items_center()
             .gap(px(7.0))
             .cursor_default()
+            .rounded(px(6.0))
+            .px(px(6.0))
+            .py(px(3.0))
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay))
+            .active(|style| style.opacity(0.8))
             .on_click(cx.listener(|this, _, _, cx| this.toggle_todo_panel(cx)))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
@@ -70,7 +74,7 @@ impl Waku {
                 theme.text_tertiary,
             ));
 
-        let mut body = div().mt(px(6.0)).flex().flex_col().gap(px(3.0));
+        let mut body = div().mt(px(6.0)).px(px(6.0)).flex().flex_col().gap(px(3.0));
         if !self.todo_panel_collapsed {
             for task in &tasks {
                 body = body.child(render_todo_row(task, &theme));
@@ -97,6 +101,14 @@ impl Waku {
 
     pub(super) fn toggle_todo_panel(&mut self, cx: &mut Context<Self>) {
         self.todo_panel_collapsed = !self.todo_panel_collapsed;
+        // Collapsing changes the panel's height, which resizes the transcript
+        // viewport above. While the user is following the tail that resize
+        // otherwise fights the scroll anchor and the transcript visibly
+        // oscillates — re-pin once so the tail stays put. When the user is
+        // scrolled up reading history, leave their viewport alone.
+        if !self.transcript_is_scrolled.get() {
+            self.pin_transcript_to_tail();
+        }
         cx.notify();
     }
 }
@@ -104,7 +116,8 @@ impl Waku {
 fn render_todo_row(task: &TodoTask, theme: &Theme) -> Div {
     let (marker, subject_color, weight) = match task.status {
         TodoTaskStatus::InProgress => (
-            icon("icons/loader-circle.svg", 11.0, theme.accent).into_any_element(),
+            // House spin primitive: honors reduce-motion, discrete cadence.
+            motion::spin(icon("icons/loader-circle.svg", 11.0, theme.accent)),
             theme.text,
             FontWeight::MEDIUM,
         ),
