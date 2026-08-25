@@ -117,6 +117,84 @@ pub(super) fn extract_progress(
         .find_map(|adapter| adapter.extract(args, partial))
 }
 
+/// PIWAKU: the settled one-line summary a completed web-access tool shows
+/// under its row, mirroring the Pi TUI's status line ("11 sources", "Go Plan
+/// | Command Code (8529 chars)"). Formulas verified against pi-web-access
+/// 0.24.2's own renderer.
+pub(super) fn completion_summary(
+    tool_name: Option<&str>,
+    result: Option<&Value>,
+) -> Option<String> {
+    let tool_name = tool_name?;
+    let details = result?.get("details")?;
+    match tool_name {
+        "web_search" => {
+            let total = details
+                .get("totalResults")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let query_count = details.get("queryCount").and_then(Value::as_u64);
+            let successful = details.get("successfulQueries").and_then(Value::as_u64);
+            let summary = match (successful, query_count) {
+                (Some(done), Some(total_queries)) if total_queries > 1 => tr!(
+                    "activity.summary.queries",
+                    done = done,
+                    total = total_queries,
+                    sources = total
+                ),
+                _ => tr!("activity.summary.sources", count = total),
+            };
+            let curated = details.get("curated").and_then(Value::as_bool) == Some(true);
+            let curated_from = details.get("curatedFrom").and_then(Value::as_u64);
+            match (curated, query_count, curated_from) {
+                (true, Some(qc), Some(cf)) => Some(tr!(
+                    "activity.summary.curated",
+                    summary = summary,
+                    kept = qc,
+                    from = cf
+                )),
+                _ => Some(summary),
+            }
+        }
+        "fetch_content" => {
+            let url_count = details.get("urlCount").and_then(Value::as_u64);
+            if url_count.is_some_and(|count| count > 1) {
+                let total = details.get("totalChars").and_then(Value::as_u64);
+                return Some(match total {
+                    Some(chars) => tr!(
+                        "activity.summary.urls_chars",
+                        count = url_count.unwrap(),
+                        chars = chars
+                    ),
+                    None => tr!("activity.summary.urls", count = url_count.unwrap()),
+                });
+            }
+            let title = details
+                .get("title")
+                .and_then(Value::as_str)
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or("Untitled");
+            let chars = details
+                .get("totalChars")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let mut summary = tr!("activity.summary.chars", title = title, chars = chars);
+            let images = details
+                .get("imageCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if images > 0 {
+                summary.push_str(&tr!("activity.summary.images", count = images));
+            }
+            if details.get("truncated").and_then(Value::as_bool) == Some(true) {
+                summary.push_str(&tr!("activity.summary.truncated"));
+            }
+            Some(summary)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,7 +213,10 @@ mod tests {
         .expect("search progress parses");
         assert_eq!(progress.fraction, Some(0.5));
         assert_eq!(progress.phase.as_deref(), Some("search"));
-        assert_eq!(progress.status_text.as_deref(), Some("GPT-5.6 sparse attention"));
+        assert_eq!(
+            progress.status_text.as_deref(),
+            Some("GPT-5.6 sparse attention")
+        );
     }
 
     #[test]
@@ -176,6 +257,54 @@ mod tests {
     }
 
     #[test]
+    fn completion_summary_mirrors_the_tui_status_lines() {
+        let search = json!({
+            "details": {
+                "totalResults": 11, "queryCount": 3, "successfulQueries": 3,
+                "curated": true, "curatedFrom": 5
+            }
+        });
+        let expected = tr!(
+            "activity.summary.curated",
+            summary = tr!(
+                "activity.summary.queries",
+                done = 3,
+                total = 3,
+                sources = 11
+            ),
+            kept = 3,
+            from = 5
+        );
+        assert_eq!(
+            completion_summary(Some("web_search"), Some(&search)).as_deref(),
+            Some(expected.as_str())
+        );
+
+        let single = json!({"details": {"totalResults": 11, "queryCount": 1}});
+        assert_eq!(
+            completion_summary(Some("web_search"), Some(&single)).as_deref(),
+            Some(tr!("activity.summary.sources", count = 11).as_str())
+        );
+
+        let fetch = json!({"details": {"title": "Go Plan | Command Code", "totalChars": 8529}});
+        assert_eq!(
+            completion_summary(Some("fetch_content"), Some(&fetch)).as_deref(),
+            Some(
+                tr!(
+                    "activity.summary.chars",
+                    title = "Go Plan | Command Code",
+                    chars = 8_529
+                )
+                .as_str()
+            )
+        );
+
+        // Other tools and missing details carry no summary.
+        assert_eq!(completion_summary(Some("bash"), Some(&search)), None);
+        assert_eq!(completion_summary(Some("web_search"), None), None);
+    }
+
+    #[test]
     fn out_of_range_or_missing_fractions_degrade_to_indeterminate() {
         let progress = extract_progress(
             Some("web_search"),
@@ -187,10 +316,17 @@ mod tests {
 
         // Unrelated tools and malformed payloads never produce progress.
         assert_eq!(
-            extract_progress(Some("bash"), None, Some(&json!({"details": {"phase": "search"}}))),
+            extract_progress(
+                Some("bash"),
+                None,
+                Some(&json!({"details": {"phase": "search"}}))
+            ),
             None
         );
-        assert_eq!(extract_progress(Some("web_search"), None, Some(&json!({}))), None);
+        assert_eq!(
+            extract_progress(Some("web_search"), None, Some(&json!({}))),
+            None
+        );
         assert_eq!(extract_progress(Some("web_search"), None, None), None);
     }
 }

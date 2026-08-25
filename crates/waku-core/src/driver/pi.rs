@@ -19,9 +19,7 @@ use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use super::{
-    activity, computer_use as computer_use_runtime, pi_extensions, tool_progress,
-};
+use super::{activity, computer_use as computer_use_runtime, pi_extensions, tool_progress};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -1484,9 +1482,18 @@ fn handle_pi_message(
             // payloads (pi-web-access first); completion clears it so the
             // row converges to its settled appearance.
             if !complete
-                && let Some(progress) = tool_progress::extract_progress(tool_name, arguments, output)
+                && let Some(progress) =
+                    tool_progress::extract_progress(tool_name, arguments, output)
             {
                 item = item.with_progress(progress);
+            }
+            // PIWAKU: settled web-access rows carry the TUI's status line
+            // ("11 sources", "Title (8529 chars)") so completion is visible.
+            if complete
+                && !failed
+                && let Some(summary) = tool_progress::completion_summary(tool_name, output)
+            {
+                item.display_description = Some(summary);
             }
             let _ = events.send(DriverEvent::RichActivity(item));
             if complete && let Some(id) = id {

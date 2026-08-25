@@ -1202,8 +1202,8 @@ pub(super) fn activity_progress_bar(fraction: f32, theme: &Theme) -> AnyElement 
     let fraction = fraction.clamp(0.0, 1.0);
     div()
         .flex_none()
-        .w(px(52.0))
-        .h(px(3.0))
+        .w(px(64.0))
+        .h(px(5.0))
         .rounded_full()
         .bg(theme.overlay)
         .overflow_hidden()

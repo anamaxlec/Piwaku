@@ -305,6 +305,14 @@ activity.action_think: 思考
 activity.action_run: 実行
 activity.action_edit: 編集
 activity.action_read: 読み込み
+activity.summary.sources: "%{count} 件のソース"
+activity.summary.queries: "%{done}/%{total} 件のクエリ、%{sources}"
+activity.summary.curated: "%{summary} (%{kept}/%{from} クエリをキュレーション)"
+activity.summary.chars: "%{title}（%{chars} 文字）"
+activity.summary.urls: "%{count} 件のURL"
+activity.summary.urls_chars: "%{count} 件のURL（%{chars} 文字）"
+activity.summary.images: " [%{count} 枚の画像]"
+activity.summary.truncated: " [切り捨て済み]"
 activity.progress.searching: 検索中
 activity.progress.curating: 結果を整理中
 activity.progress.generating_summary: 要約を生成中

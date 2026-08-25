@@ -10,9 +10,9 @@ mod deepseek;
 mod opencode;
 mod pi;
 mod pi_extensions;
-mod tool_progress;
 mod support;
 mod title_refresh;
+mod tool_progress;
 
 use std::path::PathBuf;
 use std::sync::Arc;

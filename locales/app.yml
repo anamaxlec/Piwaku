@@ -592,6 +592,38 @@ activity.action_edit:
   en: Edit
 activity.action_read:
   en: Read
+activity.summary.sources:
+  en: "%{count} sources"
+  ja: "%{count} 件のソース"
+  zh-CN: "%{count} 个来源"
+activity.summary.queries:
+  en: "%{done}/%{total} queries, %{sources}"
+  ja: "%{done}/%{total} 件のクエリ、%{sources}"
+  zh-CN: "%{done}/%{total} 次查询，%{sources}"
+activity.summary.curated:
+  en: "%{summary} (%{kept}/%{from} queries curated)"
+  ja: "%{summary} (%{kept}/%{from} クエリをキュレーション)"
+  zh-CN: "%{summary}（%{kept}/%{from} 次查询已整理）"
+activity.summary.chars:
+  en: "%{title} (%{chars} chars)"
+  ja: "%{title}（%{chars} 文字）"
+  zh-CN: "%{title}（%{chars} 字符）"
+activity.summary.urls:
+  en: "%{count} URLs"
+  ja: "%{count} 件のURL"
+  zh-CN: "%{count} 个网址"
+activity.summary.urls_chars:
+  en: "%{count} URLs (%{chars} chars)"
+  ja: "%{count} 件のURL（%{chars} 文字）"
+  zh-CN: "%{count} 个网址（%{chars} 字符）"
+activity.summary.images:
+  en: " [%{count} images]"
+  ja: " [%{count} 枚の画像]"
+  zh-CN: " [%{count} 张图片]"
+activity.summary.truncated:
+  en: " [truncated]"
+  ja: " [切り捨て済み]"
+  zh-CN: " [已截断]"
 activity.progress.searching:
   en: Searching
   ja: 検索中

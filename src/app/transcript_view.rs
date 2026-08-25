@@ -2100,6 +2100,45 @@ impl Waku {
                             }
                         })),
                 );
+            // PIWAKU: settled web-access rows keep the TUI's completion
+            // signal — a check plus the status line ("11 sources", "Title
+            // (8529 chars)") right under the header, so finishing is visible
+            // without expanding anything.
+            let web_summary = if activity.complete
+                && !activity.failed
+                && matches!(activity.kind, ActivityKind::Search | ActivityKind::Tool)
+            {
+                activity
+                    .display_description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|summary| !summary.is_empty())
+            } else {
+                None
+            };
+            item = item.children(web_summary.map(|summary| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .px(px(9.0))
+                    .pb(px(7.0))
+                    .child(icon("icons/check.svg", 11.0, theme.success))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .max_w(gpui::relative(1.0))
+                            .px(px(5.0))
+                            .py(px(1.0))
+                            .rounded(px(4.0))
+                            .bg(theme.code_wash)
+                            .text_size(sp(11.5))
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_color(theme.code_text)
+                            .truncate()
+                            .child(SharedString::from(summary.to_owned())),
+                    )
+            }));
             if item_expanded && let Some(reasoning) = reasoning {
                 // Reasoning remains model prose even though it now shares the
                 // activity stream, so keep selectable markdown rather than

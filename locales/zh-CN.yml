@@ -287,6 +287,14 @@ activity.action_think: 思考
 activity.action_run: 运行
 activity.action_edit: 编辑
 activity.action_read: 读取
+activity.summary.sources: "%{count} 个来源"
+activity.summary.queries: "%{done}/%{total} 次查询，%{sources}"
+activity.summary.curated: "%{summary}（%{kept}/%{from} 次查询已整理）"
+activity.summary.chars: "%{title}（%{chars} 字符）"
+activity.summary.urls: "%{count} 个网址"
+activity.summary.urls_chars: "%{count} 个网址（%{chars} 字符）"
+activity.summary.images: " [%{count} 张图片]"
+activity.summary.truncated: " [已截断]"
 activity.progress.searching: 搜索中
 activity.progress.curating: 整理结果
 activity.progress.generating_summary: 生成摘要
