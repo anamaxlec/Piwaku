@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::model::{PiExtensionInfo, PiExtensionScope};
 
@@ -256,6 +255,7 @@ pub fn set_enabled(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
     use serde_json::json;
 
     struct Sandbox {

@@ -7,7 +7,7 @@
 //! state always comes from the daemon.
 
 use super::*;
-use crate::model::{PiExtensionInfo, PiExtensionScope};
+use crate::model::PiExtensionScope;
 
 /// Sources with a dedicated Piwaku adapter or a deliberate non-adapter
 /// stance. Anything absent renders as generic-compatible.
@@ -64,7 +64,7 @@ impl Waku {
         let projects = self.skill_scan_projects();
         let daemon = self.daemon.client();
         eprintln!("[pi-ext] requesting inventory ({} projects)", projects.len());
-        cx.spawn(async move |this, cx| {
+        let _ = cx.spawn(async move |this, cx| {
             let extensions = cx
                 .background_executor()
                 .spawn(async move {
@@ -116,7 +116,7 @@ impl Waku {
     ) {
         self.pi_extensions_generation += 1;
         let daemon = self.daemon.client();
-        cx.spawn(async move |this, cx| {
+        let _ = cx.spawn(async move |this, cx| {
             let result = daemon
                 .request(
                     Uuid::nil(),
