@@ -42,6 +42,7 @@ pub mod model_catalog;
 pub mod opencode_pool;
 pub mod opencode_session;
 pub mod persistence;
+pub mod pi_settings;
 pub mod projectless;
 pub mod settings;
 pub mod skills;

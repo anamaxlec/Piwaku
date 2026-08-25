@@ -840,7 +840,11 @@ pub struct ThreadGoal {
 /// come back asynchronously as [`DriverEvent::GoalUpdated`]; failures surface
 /// through [`DriverEvent::Error`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum GoalOperation {
     /// Re-read the provider's current goal without changing it.
     Refresh,
@@ -1921,6 +1925,32 @@ pub enum BackgroundWorkEvent {
         key: BackgroundWorkKey,
         message: String,
     },
+}
+
+/// PIWAKU: one installed pi package as the extensions manager shows it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiExtensionInfo {
+    /// The pi settings source string, e.g. "npm:pi-web-access".
+    pub source: String,
+    /// Package name without the transport prefix, e.g. "pi-web-access".
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub scope: PiExtensionScope,
+    pub enabled: bool,
+    /// Sub-paths filtered off through the object form's "-path" entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filtered: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PiExtensionScope {
+    User,
+    Project,
 }
 
 /// PIWAKU: authoritative snapshot of the agent-owned task list, rebuilt from

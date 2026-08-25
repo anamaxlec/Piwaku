@@ -14,6 +14,12 @@ pub struct DaemonSettings {
     pub computer_use_enabled: bool,
     pub computer_use_allowed_apps: Vec<ComputerAppGrant>,
     pub disabled_providers: Vec<ProviderKind>,
+    /// PIWAKU: pi package sources disabled through the extensions manager.
+    /// pi's own settings have no whole-package disabled flag — disabling
+    /// removes the entry from its `packages` array — so the record of what
+    /// to offer re-enabling lives here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pi_disabled_packages: Vec<String>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
     #[serde(flatten)]
@@ -26,6 +32,7 @@ impl Default for DaemonSettings {
             computer_use_enabled: false,
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
+            pi_disabled_packages: Vec::new(),
             provider_binary_overrides: HashMap::new(),
             extra: BTreeMap::new(),
         }

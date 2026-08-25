@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::model::{
-    AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, UserInputAnswer,
+    AgentSession, GoalOperation, PiExtensionInfo, PiExtensionScope, Project, ProviderKind,
+    ProviderProbe, UserInputAnswer,
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
@@ -162,6 +163,21 @@ pub enum Command {
     },
     SetSkillsEnabled {
         dirs: Vec<PathBuf>,
+        enabled: bool,
+    },
+    /// PIWAKU: inventory the provider host's installed pi packages across
+    /// global and the given project scopes. Daemon-side because every pi
+    /// path is the daemon host's, never the client's.
+    LoadPiExtensions {
+        projects: Vec<(String, PathBuf)>,
+    },
+    /// PIWAKU: enable or disable one pi package. Disabling removes the entry
+    /// from pi's own settings `packages` array (its only source of truth)
+    /// and records it in daemon settings so the manager can offer it back.
+    SetPiExtensionEnabled {
+        source: String,
+        scope: PiExtensionScope,
+        project_root: Option<PathBuf>,
         enabled: bool,
     },
     TrashSkills {
@@ -396,6 +412,9 @@ pub enum ResponsePayload {
     },
     SkillsCatalog {
         catalog: SkillsCatalog,
+    },
+    PiExtensions {
+        extensions: Vec<PiExtensionInfo>,
     },
     TaskState {
         projects: Vec<Project>,
