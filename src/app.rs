@@ -1418,6 +1418,8 @@ pub struct Waku {
     pi_extensions: Option<Rc<Vec<crate::model::PiExtensionInfo>>>,
     pi_extensions_pending: bool,
     pi_extensions_generation: u64,
+    /// When the cached inventory was loaded; drives the rescan TTL.
+    pi_extensions_scanned_at: Option<Instant>,
     /// Bumped per scan; a result from a superseded scan is discarded.
     skills_scan_generation: u64,
     skills_scan_pending: bool,
@@ -2906,6 +2908,7 @@ impl Waku {
                 pi_extensions: None,
                 pi_extensions_pending: false,
                 pi_extensions_generation: 0,
+                pi_extensions_scanned_at: None,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,
                 skills_scanned_at: None,

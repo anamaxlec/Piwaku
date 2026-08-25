@@ -9,6 +9,9 @@
 use super::*;
 use crate::model::PiExtensionScope;
 
+/// How long a cached pi extension inventory stays trusted.
+const PI_EXTENSIONS_RESCAN_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// PIWAKU: temporary file trace for the inventory load path — the app's
 /// stderr is detached under Launch Services, so terminal prints never land.
 fn trace_pi_ext(message: &str) {
@@ -68,7 +71,13 @@ impl Waku {
         if self.pi_extensions_pending {
             return;
         }
-        if !force && self.pi_extensions.as_ref().is_some() {
+        // A short TTL keeps the manager honest: daemon hot-swaps and
+        // out-of-band `pi install` calls change the inventory without the
+        // app hearing about it, so a cached list must age out.
+        let fresh = self
+            .pi_extensions_scanned_at
+            .is_some_and(|scanned| scanned.elapsed() < PI_EXTENSIONS_RESCAN_AFTER);
+        if !force && self.pi_extensions.is_some() && fresh {
             return;
         }
         self.pi_extensions_pending = true;
@@ -76,7 +85,10 @@ impl Waku {
         let generation = self.pi_extensions_generation;
         let projects = self.skill_scan_projects();
         let daemon = self.daemon.client();
-        trace_pi_ext(&format!("[pi-ext] requesting inventory ({} projects)", projects.len()));
+        trace_pi_ext(&format!(
+            "[pi-ext] requesting inventory ({} projects)",
+            projects.len()
+        ));
         cx.spawn(async move |this, cx| {
             trace_pi_ext("[pi-ext] outer task started");
             let extensions = cx
@@ -89,7 +101,10 @@ impl Waku {
                         waku_client::Command::LoadPiExtensions { projects },
                     ) {
                         Ok(waku_client::ResponsePayload::PiExtensions { extensions }) => {
-                            trace_pi_ext(&format!("[pi-ext] inventory arrived: {} packages", extensions.len()));
+                            trace_pi_ext(&format!(
+                                "[pi-ext] inventory arrived: {} packages",
+                                extensions.len()
+                            ));
                             Ok(extensions)
                         }
                         Ok(_) => {
@@ -113,7 +128,10 @@ impl Waku {
                 }
                 this.pi_extensions_pending = false;
                 match extensions {
-                    Ok(extensions) => this.pi_extensions = Some(Rc::new(extensions)),
+                    Ok(extensions) => {
+                        this.pi_extensions = Some(Rc::new(extensions));
+                        this.pi_extensions_scanned_at = Some(Instant::now());
+                    }
                     Err(error) => this.show_toast(error.to_string()),
                 }
                 cx.notify();
