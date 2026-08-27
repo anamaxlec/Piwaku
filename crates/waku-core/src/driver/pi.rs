@@ -24,7 +24,8 @@ use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, InteractionMode, ProviderResumeCursor, RuntimeMode, UserInputAnswer,
+    ActivityKind, DriverEvent, GoalOperation, InteractionMode, ProviderResumeCursor, RuntimeMode,
+    UserInputAnswer,
 };
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
@@ -150,6 +151,8 @@ enum CommandMessage {
     Steer(String),
     Cancel,
     CancelExtensionRequest(String),
+    /// PIWAKU: a goal mutation for the pi-goal plugin (Refresh/Clear/Set).
+    Goal(GoalOperation),
     /// A fully-built `extension_ui_response` frame for a dialog the native
     /// question panel already answered. Prebuilt so the writer thread stays
     /// free of answer-interpretation logic.
@@ -196,6 +199,9 @@ pub struct PiDriver {
     flavor: PiFlavor,
     commands: Sender<CommandMessage>,
     pending_extension_ui: PendingExtensionUiRequests,
+    /// PIWAKU: the Pi session file this driver tracks — where pi-goal
+    /// persists its `goal-state` entries and where Refresh re-reads them.
+    goal_session_file: Arc<Mutex<Option<PathBuf>>>,
     computer_use: Option<computer_use_runtime::ComputerUseRuntime>,
 }
 
@@ -312,10 +318,12 @@ impl PiDriver {
         let reader_chatter = stdout_chatter.clone();
         let waiter_chatter = stdout_chatter.clone();
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let driver_goal_session_file: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
         let reader_pending = pending.clone();
         let reader_extension_ui = pending_extension_ui.clone();
         let reader_commands = commands.clone();
         let reader_events = events.clone();
+        let goal_reader_file = driver_goal_session_file.clone();
         let reader_thread =
             thread::Builder::new()
                 .name("waku-pi-reader".into())
@@ -340,6 +348,7 @@ impl PiDriver {
                                                 &reader_commands,
                                                 &reader_events,
                                                 &mut stream_state,
+                                                &goal_reader_file,
                                             ),
                                             Ok(None) => {}
                                             Err(error) => {
@@ -396,6 +405,8 @@ impl PiDriver {
 
         let writer_pending = pending;
         let writer_events = events.clone();
+        let goal_writer_file = driver_goal_session_file.clone();
+
         thread::Builder::new()
             .name("waku-pi-writer".into())
             .spawn(move || {
@@ -508,6 +519,18 @@ impl PiDriver {
                 .ok()
                 .and_then(|stats| pi_context_usage(&state, Some(&stats)))
                 .or_else(|| pi_context_usage(&state, None));
+                // PIWAKU: track the session file so the goal UI can read
+                // pi-goal's `goal-state` entries; publish whatever is
+                // already persisted (resume path included).
+                if let ProviderResumeCursor::Pi { session_file, .. } = &cursor {
+                    *goal_writer_file.lock() = session_file.clone();
+                    if let Some(session_file) = session_file {
+                        if let Some(goal) = pi_extensions::read_goal_from_session_file(session_file)
+                        {
+                            let _ = writer_events.send(DriverEvent::GoalUpdated(Some(goal)));
+                        }
+                    }
+                }
                 let _ = writer_events.send(DriverEvent::Connected {
                     provider_cursor: Some(cursor.clone()),
                 });
@@ -588,6 +611,38 @@ impl PiDriver {
                                 )));
                             }
                         }
+                        CommandMessage::Goal(operation) => match operation {
+                            GoalOperation::Refresh => {
+                                // The daemon asks to re-read state; the
+                                // driver owns no goal cache of its own.
+                            }
+                            GoalOperation::Clear => {
+                                let _ = send_request(
+                                    &mut stdin,
+                                    &writer_pending,
+                                    &mut next_request_id,
+                                    json!({"type": "prompt", "message": "/goal clear"}),
+                                );
+                            }
+                            GoalOperation::Set {
+                                objective, status, ..
+                            } => {
+                                let message =
+                                    pi_extensions::goal_prompt_for_operation(&GoalOperation::Set {
+                                        objective: objective.clone(),
+                                        status,
+                                        replace: false,
+                                    });
+                                if let Some(message) = message {
+                                    let _ = send_request(
+                                        &mut stdin,
+                                        &writer_pending,
+                                        &mut next_request_id,
+                                        json!({"type": "prompt", "message": message}),
+                                    );
+                                }
+                            }
+                        },
                         CommandMessage::Options(options) => {
                             if options.model != current_model {
                                 match options.model.as_deref().map(parse_model_slug).transpose() {
@@ -770,6 +825,7 @@ impl PiDriver {
             flavor,
             commands,
             pending_extension_ui,
+            goal_session_file: driver_goal_session_file,
             computer_use,
         })
     }
@@ -778,6 +834,13 @@ impl PiDriver {
 impl DriverControl for PiDriver {
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
+    }
+
+    /// PIWAKU: goal state lives in pi-goal's session entries; Refresh
+    /// re-reads them, Set/Clear steer the plugin's own `/goal` command so
+    /// its runtime (continuation, budgets, safety) stays authoritative.
+    fn goal(&self, operation: GoalOperation) {
+        let _ = self.commands.send(CommandMessage::Goal(operation));
     }
 
     fn supports_steer(&self) -> bool {
@@ -1305,6 +1368,7 @@ fn handle_pi_message(
     _commands: &Sender<CommandMessage>,
     events: &impl DriverEventSink,
     state: &mut PiStreamState,
+    goal_session_file: &Mutex<Option<PathBuf>>,
 ) {
     let event_type = value
         .get("type")
@@ -1363,6 +1427,13 @@ fn handle_pi_message(
         // Dialogs never outlive the turn that opened them; Pi aborts their
         // tool calls on settle, so any leftover entry is stale.
         pending_extension_ui.lock().clear();
+        // PIWAKU: pi-goal writes its `goal-state` entries during turns (the
+        // agent may have run `/goal …` itself); re-read on every settle so
+        // the panel tracks the plugin without extra protocol.
+        if let Some(session_file) = goal_session_file.lock().clone() {
+            let refreshed = pi_extensions::read_goal_from_session_file(&session_file);
+            let _ = events.send(DriverEvent::GoalUpdated(refreshed));
+        }
         *state = PiStreamState::default();
         return;
     }
@@ -1630,6 +1701,11 @@ mod tests {
 
     /// Fresh extension-dialog registry for tests that don't exercise the
     /// dialog bridge.
+    /// Tests run without a Pi session file; the goal hooks become no-ops.
+    fn no_goal_file() -> Mutex<Option<PathBuf>> {
+        Mutex::new(None)
+    }
+
     fn no_extension_ui() -> PendingExtensionUiRequests {
         Arc::new(Mutex::new(HashMap::new()))
     }
@@ -1708,6 +1784,7 @@ mod tests {
             flavor: PiFlavor::Pi,
             commands,
             pending_extension_ui: no_extension_ui(),
+            goal_session_file: Arc::new(Mutex::new(None)),
             computer_use: None,
         };
         let options = |mode, interaction_mode| SessionOptions {
@@ -1844,6 +1921,7 @@ mod tests {
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -1999,6 +2077,7 @@ mod tests {
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -2040,6 +2119,7 @@ mod tests {
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -2059,6 +2139,7 @@ mod tests {
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -2118,6 +2199,7 @@ mod tests {
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -2132,6 +2214,7 @@ mod tests {
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -2157,6 +2240,7 @@ mod tests {
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
 
         assert!(matches!(event_rx.try_recv(), Err(TryRecvError::Empty)));
@@ -2183,6 +2267,7 @@ mod tests {
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
 
         assert!(matches!(
@@ -2220,6 +2305,7 @@ mod tests {
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
 
         assert!(matches!(
@@ -2275,6 +2361,7 @@ mod tests {
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -2316,6 +2403,7 @@ mod tests {
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 

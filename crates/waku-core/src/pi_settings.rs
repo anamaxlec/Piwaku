@@ -71,9 +71,7 @@ fn source_name(source: &str) -> String {
 fn store_dir(home: &Path, source: &str) -> PathBuf {
     let without_transport = source
         .split_once(':')
-        .filter(|(transport, _)| {
-            matches!(*transport, "npm" | "git" | "github")
-        })
+        .filter(|(transport, _)| matches!(*transport, "npm" | "git" | "github"))
         .map_or(source, |(_, rest)| rest);
     let trimmed = without_transport.trim_end_matches('/');
     let package = if trimmed.starts_with('@') || !trimmed.contains('/') {
@@ -82,7 +80,10 @@ fn store_dir(home: &Path, source: &str) -> PathBuf {
         // git/github sources install under their package name.
         source_name(source)
     };
-    agent_dir(home).join("npm").join("node_modules").join(package)
+    agent_dir(home)
+        .join("npm")
+        .join("node_modules")
+        .join(package)
 }
 
 fn entry_source(entry: &Value) -> Option<&str> {

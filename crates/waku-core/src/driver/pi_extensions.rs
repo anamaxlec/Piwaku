@@ -16,7 +16,8 @@
 use serde_json::{Value, json};
 
 use crate::model::{
-    TodoSnapshot, TodoTask, TodoTaskStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
+    GoalOperation, ThreadGoal, ThreadGoalStatus, TodoSnapshot, TodoTask, TodoTaskStatus,
+    UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 
 /// The dialog primitives this bridge understands. Fire-and-forget requests
@@ -103,6 +104,79 @@ impl PendingExtensionUi {
             object.insert("id".to_owned(), json!(request_id));
         }
         fields
+    }
+}
+
+/// PIWAKU: pi-goal persists its state as `goal-state` custom session
+/// entries — the LAST one on the branch is authoritative, mirroring the
+/// plugin's own `loadGoalStateFromSession`. The session file path is the
+/// one the driver already tracks for resume; reading it here means the
+/// goal UI reflects exactly what the plugin wrote, with no protocol
+/// changes and no state owned in two places.
+pub(crate) fn read_goal_from_session_file(session_file: &std::path::Path) -> Option<ThreadGoal> {
+    let content = std::fs::read_to_string(session_file).ok()?;
+    let goal = content
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|entry| entry.get("customType").and_then(Value::as_str) == Some("goal-state"))?;
+    let goal = goal.pointer("/data/goal")?;
+    if goal.is_null() {
+        return None;
+    }
+    let objective = goal.get("text").and_then(Value::as_str)?.trim();
+    if objective.is_empty() {
+        return None;
+    }
+    let status = match goal.get("status").and_then(Value::as_str)? {
+        // `queued` is pi-goal's legacy queue state; Waku has no equivalent.
+        "active" => ThreadGoalStatus::Active,
+        "paused" => ThreadGoalStatus::Paused,
+        "blocked" => ThreadGoalStatus::Blocked,
+        "usage_limited" => ThreadGoalStatus::UsageLimited,
+        "budget_limited" => ThreadGoalStatus::BudgetLimited,
+        "complete" => ThreadGoalStatus::Complete,
+        _ => return None,
+    };
+    Some(ThreadGoal {
+        objective: objective.to_owned(),
+        status,
+        token_budget: goal.get("tokenBudget").and_then(Value::as_i64),
+        tokens_used: goal.get("tokensUsed").and_then(Value::as_i64).unwrap_or(0),
+        time_used_seconds: goal
+            .get("timeUsedSeconds")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+    })
+}
+
+/// PIWAKU: goal mutations route through the plugin's own `/goal` command —
+/// it owns the runtime (continuation prompts, budgets, safety) and writing
+/// session entries behind its back would be clobbered on the next
+/// `persistGoal`. `None` means the operation needs no prompt (Refresh is
+/// served by re-reading the session file).
+pub(crate) fn goal_prompt_for_operation(operation: &GoalOperation) -> Option<String> {
+    match operation {
+        GoalOperation::Refresh => None,
+        GoalOperation::Clear => Some("/goal clear".to_owned()),
+        GoalOperation::Set {
+            objective, status, ..
+        } => {
+            if let Some(objective) = objective
+                .as_deref()
+                .map(str::trim)
+                .filter(|objective| !objective.is_empty())
+            {
+                // Starting an objective replaces the previous one and
+                // kicks off goal mode — exactly what "set a goal" means.
+                return Some(format!("/goal {objective}"));
+            }
+            match status {
+                Some(ThreadGoalStatus::Paused) => Some("/goal pause".to_owned()),
+                Some(ThreadGoalStatus::Active) => Some("/goal resume".to_owned()),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -254,6 +328,78 @@ pub(crate) fn parse_extension_ui_request(value: &Value) -> Option<ParsedExtensio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn goal_state_reads_the_last_session_entry() {
+        let dir = std::env::temp_dir().join(format!("piwaku-goal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("session.jsonl");
+        std::fs::write(
+            &file,
+            [
+                r#"{"type":"user","text":"hi"}"#,
+                r#"{"customType":"goal-state","data":{"goal":{"id":"g1","text":"ship it","status":"active","tokensUsed":120,"timeUsedSeconds":30}}}"#,
+                r#"{"type":"assistant","text":"ok"}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let goal = read_goal_from_session_file(&file).expect("goal found");
+        assert_eq!(goal.objective, "ship it");
+        assert_eq!(goal.status, ThreadGoalStatus::Active);
+        assert_eq!(goal.tokens_used, 120);
+        assert_eq!(goal.time_used_seconds, 30);
+
+        // A later cleared entry (goal: null) wins — the goal is gone.
+        std::fs::write(
+            &file,
+            [
+                r#"{"customType":"goal-state","data":{"goal":{"id":"g1","text":"ship it","status":"active"}}}"#,
+                r#"{"customType":"goal-state","data":{"goal":null}}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        assert_eq!(read_goal_from_session_file(&file), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn goal_operations_map_to_the_plugin_command() {
+        assert_eq!(
+            goal_prompt_for_operation(&GoalOperation::Refresh),
+            None,
+            "refresh re-reads the file instead of prompting"
+        );
+        assert_eq!(
+            goal_prompt_for_operation(&GoalOperation::Clear),
+            Some("/goal clear".to_owned())
+        );
+        assert_eq!(
+            goal_prompt_for_operation(&GoalOperation::Set {
+                objective: Some("write the report".to_owned()),
+                status: None,
+                replace: true,
+            }),
+            Some("/goal write the report".to_owned())
+        );
+        assert_eq!(
+            goal_prompt_for_operation(&GoalOperation::Set {
+                objective: None,
+                status: Some(ThreadGoalStatus::Paused),
+                replace: false,
+            }),
+            Some("/goal pause".to_owned())
+        );
+        assert_eq!(
+            goal_prompt_for_operation(&GoalOperation::Set {
+                objective: None,
+                status: Some(ThreadGoalStatus::Active),
+                replace: false,
+            }),
+            Some("/goal resume".to_owned())
+        );
+    }
 
     fn answers(values: &[&str]) -> Vec<UserInputAnswer> {
         vec![UserInputAnswer {
