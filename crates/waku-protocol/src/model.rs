@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -143,7 +144,8 @@ impl ProviderKind {
     pub fn supports_model_discovery(self) -> bool {
         matches!(
             self,
-            Self::Codex
+            Self::Claude
+                | Self::Codex
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::Fx
@@ -820,6 +822,38 @@ impl ThreadGoalStatus {
     }
 }
 
+/// A resumable conversation discovered in a provider CLI's own history.
+///
+/// This is deliberately lightweight: the command palette can list hundreds of
+/// native sessions without moving their transcripts over the daemon protocol.
+/// [`ProviderSessionHistory`] is fetched only after the user chooses one.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct ProviderSessionSummary {
+    pub cursor: ProviderResumeCursor,
+    pub title: String,
+    pub cwd: PathBuf,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+impl ProviderSessionSummary {
+    pub fn provider(&self) -> ProviderKind {
+        self.cursor.provider()
+    }
+}
+
+/// The displayable portion of a provider-native conversation imported into a
+/// Waku task. Provider history remains authoritative; unsupported native
+/// items such as private reasoning or provider-only control records are
+/// intentionally absent.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+pub struct ProviderSessionHistory {
+    #[serde(default)]
+    pub messages: Vec<Message>,
+    #[serde(default)]
+    pub turns: Vec<AgentTurn>,
+}
+
 /// A provider-persisted objective the agent keeps pursuing across turns.
 /// Field names follow the Codex app-server payload so its `goal` objects
 /// deserialize directly.
@@ -1060,6 +1094,15 @@ impl AgentSession {
             || !self.turns.is_empty()
             || !self.messages.is_empty()
             || self.provider_cursor.is_some()
+    }
+
+    /// Identifier owned by the underlying agent CLI, once its native session
+    /// has been established.
+    pub fn provider_native_id(&self) -> Option<&str> {
+        self.provider_cursor
+            .as_ref()
+            .map(ProviderResumeCursor::native_id)
+            .filter(|id| !id.trim().is_empty())
     }
 
     pub fn display_title(&self) -> &str {
@@ -1786,12 +1829,35 @@ pub enum DriverEvent {
     /// or (`None`) cleared. Carries the whole goal so late subscribers need
     /// no earlier event.
     GoalUpdated(Option<ThreadGoal>),
+    /// The provider's native interaction mode changed outside Waku's mode
+    /// control (for example, Pi's plan-mode extension persisted a transition).
+    InteractionModeUpdated(InteractionMode),
+    /// A provider extension asks the host to show a short, non-transcript
+    /// notification. Pi's RPC `notify` is fire-and-forget, so this event does
+    /// not carry a request id or expect a response.
+    Notification {
+        message: String,
+        level: String,
+    },
+    /// The session-scoped status published by Magic Context. `None` clears
+    /// the status when the extension sends an empty `setStatus` value.
+    MagicContextStatusUpdated(Option<MagicContextStatus>),
     TurnFinished {
         success: bool,
         summary: Option<String>,
     },
     Error(String),
     ProcessExited,
+}
+
+/// Small, credential-free status projection from Magic Context. Details from
+/// the extension's custom entry are intentionally not part of the protocol.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MagicContextStatus {
+    pub title: String,
+    pub text: String,
+    pub level: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
@@ -1941,6 +2007,14 @@ pub struct PiExtensionInfo {
     pub description: Option<String>,
     pub scope: PiExtensionScope,
     pub enabled: bool,
+    /// Whether Waku may change this entry through the extensions manager.
+    /// Entries discovered only by `pi list` are intentionally read-only.
+    #[serde(default)]
+    pub manageable: bool,
+    /// Whether the source came from Pi settings or Waku's disabled record.
+    /// A false value means it was only discovered by Pi at runtime.
+    #[serde(default)]
+    pub configured: bool,
     /// Sub-paths filtered off through the object form's "-path" entries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filtered: Vec<String>,
@@ -1954,6 +2028,98 @@ pub struct PiExtensionInfo {
 pub enum PiExtensionScope {
     User,
     Project,
+}
+
+/// PIWAKU: stable, daemon-host Pi settings surfaced by Settings → Pi.
+/// Unknown Pi settings intentionally stay out of this model.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiSettingsSnapshot {
+    pub global: PiSettingsScopeSnapshot,
+    pub projects: Vec<PiProjectSettingsSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiProjectSettingsSnapshot {
+    pub name: String,
+    pub project_root: PathBuf,
+    pub settings: PiSettingsScopeSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiSettingsScopeSnapshot {
+    pub config_path: PathBuf,
+    pub extensions_path: PathBuf,
+    pub default_provider: Option<String>,
+    pub default_model: Option<String>,
+    pub default_thinking_level: Option<String>,
+    pub quiet_startup: Option<bool>,
+    pub extension_settings: Vec<PiExtensionSettingsGroup>,
+    /// A malformed scope is visible to the client without taking down the
+    /// daemon or hiding a valid sibling scope.
+    pub error: Option<String>,
+}
+
+/// Credential-blind view of the providers configured in Pi's models.json.
+/// The daemon deliberately exposes no arbitrary JSON or credential values.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiProviderSettingsSnapshot {
+    pub models_path: PathBuf,
+    pub providers: Vec<PiProviderSnapshot>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiProviderSnapshot {
+    pub id: String,
+    pub name: Option<String>,
+    pub base_url: Option<String>,
+    pub api: Option<String>,
+    pub api_key_configured: bool,
+    /// Unsupported Pi API kinds are visible but cannot be edited by Waku.
+    pub read_only: bool,
+    pub models: Vec<PiModelSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiModelSnapshot {
+    pub id: String,
+    pub name: String,
+    pub api: Option<String>,
+    /// Unknown model API values are visible but cannot be edited or deleted.
+    pub read_only: bool,
+    pub reasoning: Option<bool>,
+    /// Stable UI value: `text` or `text+image`.
+    pub input: String,
+    pub context_window: Option<u64>,
+    pub max_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PiApiKeyUpdate {
+    Unchanged,
+    Replace(String),
+    Clear,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiExtensionSettingsGroup {
+    pub extension: String,
+    pub entries: Vec<PiExtensionSetting>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiExtensionSetting {
+    pub key: String,
+    pub value: Value,
 }
 
 /// PIWAKU: authoritative snapshot of the agent-owned task list, rebuilt from
@@ -4079,7 +4245,7 @@ mod tests {
     #[test]
     fn only_dynamic_provider_catalogs_are_discovered() {
         assert!(!ProviderKind::Amp.supports_model_discovery());
-        assert!(!ProviderKind::Claude.supports_model_discovery());
+        assert!(ProviderKind::Claude.supports_model_discovery());
         assert!(ProviderKind::Codex.supports_model_discovery());
         assert!(ProviderKind::Cursor.supports_model_discovery());
         assert!(ProviderKind::DeepSeek.supports_model_discovery());

@@ -34,13 +34,24 @@ updater.up_to_date: Waku は最新です
 updater.failed: "アップデートに失敗しました：%{error}"
 
 command_palette.placeholder: タスクを検索、またはコマンドを実行…
+command_palette.resume_placeholder: ターミナルセッションを検索…
+command_palette.resume_provider_placeholder: プロバイダーを選択…
 command_palette.suggested: おすすめ
 command_palette.tasks: タスク
+command_palette.sessions: ターミナルセッション
+command_palette.providers: プロバイダー
 command_palette.commands: コマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
+command_palette.resume: 再開…
+command_palette.change_provider: プロバイダーを変更
+command_palette.current_provider: 現在のプロバイダー
 command_palette.open_project: プロジェクトを開く…
 command_palette.choose_model: モデルを選択…
+command_palette.copy_task_id: タスク ID をコピー
+command_palette.copy_agent_cli_thread_id: エージェント CLI スレッド ID をコピー
+command_palette.task_id_copied: タスク ID をコピーしました
+command_palette.agent_cli_thread_id_copied: エージェント CLI スレッド ID をコピーしました
 command_palette.collapse_sidebar_groups: サイドバーのすべてのグループを折りたたむ
 command_palette.show_sidebar: サイドバーを表示
 command_palette.hide_sidebar: サイドバーを隠す
@@ -51,6 +62,13 @@ command_palette.you: あなた
 command_palette.agent: エージェント
 command_palette.no_results: 一致するタスクやコマンドはありません
 command_palette.no_results_hint: タスク名、メッセージ、プロジェクト、設定、コマンドで検索してください
+command_palette.no_matching_providers: 一致するプロバイダーはありません
+command_palette.loading_sessions: ターミナルセッションを読み込み中…
+command_palette.no_resume_sessions: 再開できるターミナルセッションはありません
+command_palette.no_resume_sessions_hint: Waku にすでにあるセッションは表示されません。エージェント CLI でセッションを開始して、もう一度お試しください。
+command_palette.could_not_load_sessions: ターミナルセッションを読み込めませんでした
+command_palette.loading_selected_session: 会話を読み込み中…
+command_palette.resume_failed: "セッションを再開できませんでした：%{error}"
 
 language.title: 言語
 language.system: システム
@@ -69,6 +87,74 @@ pi_ext.compat_native: ネイティブ
 pi_ext.compat_replaced: "Wakuが置き換え"
 pi_ext.compat_tui_only: "TUI専用"
 pi_ext.compat_generic: 互換
+pi_ext.check_update: 更新確認
+pi_ext.checking_update: "確認中…"
+pi_ext.update: 更新
+pi_ext.update_available: 更新あり
+pi_ext.up_to_date: 最新です
+pi_ext.update_unavailable: 利用不可
+pi_ext.remove: 削除
+pi_ext.confirm_remove: 削除を確認
+pi_ext.enable_before_remove: 削除する前に有効化してください
+pi_ext.updated_toast: "拡張機能を更新しました。新しい Pi セッションで使用されます。"
+pi_ext.removed_toast: "拡張機能を削除しました。新しい Pi セッションから反映されます。"
+pi_ext.action_failed: "拡張機能の操作に失敗しました: %{error}"
+pi_ext.discovered_read_only: Pi による自動検出（読み取り専用）
+pi_settings.general: 一般
+pi_settings.extensions: 拡張機能
+pi_settings.providers: プロバイダー
+pi_settings.models_path: モデルパス
+pi_settings.provider_editor: プロバイダー編集
+pi_settings.provider_key_hint: API キーは表示されません。現在のキーを維持するには空欄にしてください。
+pi_settings.provider_id_placeholder: プロバイダー ID
+pi_settings.provider_name_placeholder: 表示名
+pi_settings.provider_base_url_placeholder: ベース URL
+pi_settings.provider_api_placeholder: API
+pi_settings.provider_api_key_placeholder: API キー（空欄で変更なし）
+pi_settings.supported_apis: "対応 API: openai-completions、openai-responses、anthropic-messages、google-generative-ai"
+pi_settings.model_provider_placeholder: プロバイダー ID
+pi_settings.model_id_placeholder: モデル ID
+pi_settings.model_name_placeholder: モデル名
+pi_settings.model_api_placeholder: API 上書き（任意）
+pi_settings.model_reasoning_placeholder: "推論: true/false"
+pi_settings.model_input_placeholder: "入力: text または text+image"
+pi_settings.model_context_placeholder: コンテキストウィンドウ
+pi_settings.model_max_tokens_placeholder: 最大トークン数
+pi_settings.save_provider: プロバイダーを保存
+pi_settings.new_provider: 新しいプロバイダー
+pi_settings.clear_api_key: API キーを消去
+pi_settings.edit: 編集
+pi_settings.delete: 削除
+pi_settings.confirm_delete: 削除を確認
+pi_settings.new_model: 新しいモデル
+pi_settings.save_model: モデルを保存
+pi_settings.no_providers: カスタムプロバイダーは設定されていません。
+pi_settings.no_models: モデルは設定されていません。
+pi_settings.api_key_configured: API キー設定済み
+pi_settings.api_key_not_configured: API キー未設定
+pi_settings.read_only_provider: 未対応のプロバイダー API のため読み取り専用です。
+pi_settings.extension_settings: 拡張設定
+pi_settings.advanced: 詳細設定
+pi_settings.default_provider: デフォルトプロバイダー
+pi_settings.default_model: デフォルトモデル
+pi_settings.default_thinking_level: デフォルト思考レベル
+pi_settings.quiet_startup: 静かな起動
+pi_settings.quiet_startup_description: 起動バナーを表示せずに Pi を起動します。
+pi_settings.not_set: 未設定
+pi_settings.loading: Pi 設定を読み込み中…
+pi_settings.unavailable: 利用不可
+pi_settings.no_extensions: Pi 拡張機能はありません。
+pi_settings.no_extension_settings: このスコープに拡張設定はありません。
+pi_settings.no_project_settings: プロジェクトスコープは設定されていません。
+pi_settings.global: グローバル
+pi_settings.project: プロジェクト
+pi_settings.config_path: グローバル設定パス
+pi_settings.open_config: 設定を開く
+pi_settings.reveal_config: 設定を表示
+pi_settings.remote_unavailable: 設定ファイルはデーモンホスト上にあるため、リモート接続ではデスクトップのファイル操作を利用できません。
+pi_settings.reload_runtime: Pi ランタイムを再読み込み
+pi_settings.reload_runtime_description: 選択中の実行中 Pi セッションを再読み込みします。次のプロンプトは同じカーソルから再開します。
+pi_settings.runtime_reloaded: Pi ランタイムを再読み込みしました
 settings.usage: 使用状況
 settings.daemon: デーモン
 settings.computer_use: コンピュータ操作
@@ -570,6 +656,7 @@ commands.fast_description: 高速モードを切り替え
 commands.fast_enabled: 高速モードを有効にしました
 commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
+commands.resume_description: ターミナルのエージェントセッションを再開
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？
 goal.set: ゴールを設定
@@ -779,6 +866,8 @@ environment.summary: 環境とバックグラウンド作業
 environment.changes: 変更
 environment.commit_or_push: コミットまたはプッシュ
 environment.compare_branch: ブランチを比較
+environment.task_id: タスク ID
+environment.agent_cli_thread_id: エージェント CLI スレッド ID
 
 commit.message_placeholder: コミットメッセージ（空欄の場合は自動生成）…
 commit.message: コミットメッセージ

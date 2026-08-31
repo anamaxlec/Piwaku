@@ -14,6 +14,16 @@ source: string,
  */
 name: string, version?: string | null, description?: string | null, scope: PiExtensionScope, enabled: boolean,
 /**
+ * Whether Waku may change this entry through the extensions manager.
+ * Entries discovered only by `pi list` are intentionally read-only.
+ */
+manageable: boolean,
+/**
+ * Whether the source came from Pi settings or Waku's disabled record.
+ * A false value means it was only discovered by Pi at runtime.
+ */
+configured: boolean,
+/**
  * Sub-paths filtered off through the object form's "-path" entries.
  */
 filtered?: Array<string>,

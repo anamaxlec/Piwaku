@@ -23,6 +23,21 @@ pub(super) fn composer_submit_action(
     }
 }
 
+const MAGIC_STATUS_DISPLAY_MAX_CHARS: usize = 512;
+
+fn compact_magic_status_text(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if matches!(character, '\r' | '\n' | '\t') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(MAGIC_STATUS_DISPLAY_MAX_CHARS)
+        .collect()
+}
+
 impl Waku {
     // ── Permission ─────────────────────────────────────────────────────────
 
@@ -2215,7 +2230,21 @@ impl Waku {
         prompt: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.execute_fast_mode_toggle(prompt, cx) || self.execute_goal_composer_command(prompt, cx)
+        self.execute_resume_composer_command(prompt, cx)
+            || self.execute_fast_mode_toggle(prompt, cx)
+            || self.execute_goal_composer_command(prompt, cx)
+    }
+
+    fn execute_resume_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        if !crate::composer_complete::is_resume_submission(prompt) {
+            return false;
+        }
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        // Submission notifications already hold this entity mutably. Dispatch
+        // after that effect returns so the window action can safely re-enter
+        // Waku and move focus into the Resume picker.
+        cx.defer(|cx| cx.dispatch_action(&OpenResumePicker));
+        true
     }
 
     /// Bridge Codex's native `/goal` command without starting a turn. Reads run
@@ -2807,6 +2836,8 @@ impl Waku {
                     card.child(self.render_composer_attachments(cx))
                 })
                 .child(div().pt(px(2.0)).child(self.composer.clone()))
+                .children(self.render_inline_pi_notification(theme))
+                .children(self.render_magic_context_status(theme))
                 .child(
                     div()
                         .mt(px(8.0))
@@ -2951,6 +2982,71 @@ impl Waku {
                                 })),
                         }),
                 ),
+        )
+    }
+
+    fn render_inline_pi_notification(&self, theme: Theme) -> Option<AnyElement> {
+        let notification = self.inline_pi_notification.as_ref()?;
+        if self.state.selected_session != Some(notification.session_id) {
+            return None;
+        }
+        Some(
+            div()
+                .id("pi-extension-notification")
+                .mt(px(6.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(sp(11.5))
+                .text_color(theme.text_tertiary)
+                .child(icon("icons/info.svg", 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(SharedString::from(notification.message.clone())),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_magic_context_status(&self, theme: Theme) -> Option<AnyElement> {
+        let status = self
+            .selected_session()
+            .and_then(|session| self.runtimes.get(&session.id))
+            .and_then(|runtime| runtime.magic_context_status.as_ref())?;
+        let color = match status.level.as_str() {
+            "error" => theme.danger,
+            "warning" => theme.warning,
+            "success" => theme.success,
+            _ => theme.text_tertiary,
+        };
+        Some(
+            div()
+                .id("magic-context-status")
+                .mt(px(6.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(sp(11.5))
+                .text_color(color)
+                .child(icon("icons/sparkle.svg", 11.0, color))
+                .child(
+                    div()
+                        .flex_none()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(SharedString::from(status.title.clone())),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(theme.text_secondary)
+                        .child(SharedString::from(compact_magic_status_text(&status.text))),
+                )
+                .into_any_element(),
         )
     }
 
@@ -4014,4 +4110,18 @@ pub(super) fn visible_picker_models(
         });
     }
     models
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_magic_status_text;
+
+    #[test]
+    fn magic_status_display_is_single_line_and_bounded() {
+        assert_eq!(
+            compact_magic_status_text("one\ntwo\rthree\tfour"),
+            "one two three four"
+        );
+        assert_eq!(compact_magic_status_text(&"x".repeat(600)).len(), 512);
+    }
 }

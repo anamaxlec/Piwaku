@@ -86,6 +86,13 @@ pub fn command_composer_text(command: &SlashCommand) -> String {
     format!("/{}", command.name)
 }
 
+/// Whether the composer submitted Waku's global terminal-session picker.
+/// The command is reserved by daemon-side discovery, so it is intentionally
+/// provider-neutral and never crosses into a provider transport.
+pub fn is_resume_submission(prompt: &str) -> bool {
+    prompt.trim() == "/resume"
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Waku bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -143,9 +150,9 @@ pub fn parse_goal_submission(
     prompt: &str,
     commands: &[SlashCommand],
 ) -> Option<GoalCommand> {
-    if provider != ProviderKind::Codex {
-        return None;
-    }
+    // PIWAKU: Pi reaches the goal panel through the pi-goal plugin's /goal
+    // command (registered as a plugin, not a builtin), so its check accepts
+    // any visible "goal" command; Codex keeps its builtin-only rule.
     let invocation = prompt.trim().strip_prefix('/')?;
     let (name, arguments) = invocation
         .split_once(char::is_whitespace)
@@ -155,12 +162,17 @@ pub fn parse_goal_submission(
     if name != "goal" {
         return None;
     }
-    let goal_is_codex_builtin = commands.iter().any(|command| {
+    let goal_command_exists = commands.iter().any(|command| {
         command.name == "goal"
-            && command.scope == CommandScope::Builtin
-            && command.template.is_none()
+            && match provider {
+                ProviderKind::Codex => {
+                    command.scope == CommandScope::Builtin && command.template.is_none()
+                }
+                ProviderKind::Pi => true,
+                _ => false,
+            }
     });
-    if !goal_is_codex_builtin {
+    if !goal_command_exists {
         return None;
     }
     Some(match arguments {
@@ -424,6 +436,14 @@ mod tests {
     }
 
     #[test]
+    fn resume_is_an_exact_provider_neutral_local_command() {
+        assert!(is_resume_submission("/resume"));
+        assert!(is_resume_submission("  /resume  "));
+        assert!(!is_resume_submission("/resume latest"));
+        assert!(!is_resume_submission("please /resume"));
+    }
+
+    #[test]
     fn fast_toggle_uses_the_models_concrete_service_tier_id() {
         let tiers = [ProviderModelOption::new("priority", "Fast")];
         assert_eq!(
@@ -530,6 +550,7 @@ mod tests {
 
     #[test]
     fn goal_command_is_codex_only_and_respects_overrides() {
+        // Non-Pi, non-Codex providers have no goal surface at all.
         let builtin = command("goal", CommandScope::Builtin);
         assert_eq!(
             parse_goal_submission(
@@ -539,12 +560,29 @@ mod tests {
             ),
             None
         );
-        // A project command deliberately owning /goal wins the collision.
+        // A project command deliberately owning /goal wins the Codex
+        // collision.
         let mut project = command("goal", CommandScope::Project);
         project.template = Some("do project things".into());
         assert_eq!(
             parse_goal_submission(ProviderKind::Codex, "/goal", std::slice::from_ref(&project)),
             None
+        );
+
+        // PIWAKU: Pi rides the pi-goal plugin's own /goal — any visible
+        // goal command counts, including plugin-scoped ones.
+        assert_eq!(
+            parse_goal_submission(
+                ProviderKind::Pi,
+                "/goal pause",
+                std::slice::from_ref(&project)
+            ),
+            Some(GoalCommand::Pause)
+        );
+        assert_eq!(
+            parse_goal_submission(ProviderKind::Pi, "/goal write it", &[]),
+            None,
+            "no visible /goal command means no panel"
         );
     }
 }

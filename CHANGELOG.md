@@ -16,6 +16,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## 0.1.16
+
+- Import and continue conversations started in agent CLIs with `/resume` or the command palette across every provider, in both Waku and Waku Web
+- Linux: add signed in-app updates with clean relaunch and automatic rollback
+- Copy Waku task IDs and agent CLI thread IDs from task info or the command palette
+- Keep each response's actions and changed-file summary after its final tool activity
+- Keep the selected task visible when navigating the sidebar
+- Let nested transcript and command-output scrollers hand wheel gestures to the page only at their boundaries
+- Keep multiline background-work titles on one line in summaries and panel headers
+
 ## [0.1.15]
 
 - Codex thread goals: type /goal to set a persistent objective the task keeps pursuing — before or after the first message — with its autonomous pursuit streaming into the transcript, a status chip showing live budget or elapsed time, and a dialog to edit, pause, resume, or clear the goal (also in Waku Web)

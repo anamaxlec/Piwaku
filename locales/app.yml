@@ -66,20 +66,42 @@ updater.failed:
 
 command_palette.placeholder:
   en: Search tasks or run a command…
+command_palette.resume_placeholder:
+  en: Search terminal sessions…
+command_palette.resume_provider_placeholder:
+  en: Select a provider…
 command_palette.suggested:
   en: Suggested
 command_palette.tasks:
   en: Tasks
+command_palette.sessions:
+  en: Terminal sessions
+command_palette.providers:
+  en: Providers
 command_palette.commands:
   en: Commands
 command_palette.settings:
   en: Settings
 command_palette.new_task:
   en: New task
+command_palette.resume:
+  en: Resume…
+command_palette.change_provider:
+  en: Change provider
+command_palette.current_provider:
+  en: Current provider
 command_palette.open_project:
   en: Open project…
 command_palette.choose_model:
   en: Choose model…
+command_palette.copy_task_id:
+  en: Copy Task ID
+command_palette.copy_agent_cli_thread_id:
+  en: Copy Agent CLI thread ID
+command_palette.task_id_copied:
+  en: Task ID copied
+command_palette.agent_cli_thread_id_copied:
+  en: Agent CLI thread ID copied
 command_palette.collapse_sidebar_groups:
   en: Collapse all sidebar groups
 command_palette.show_sidebar:
@@ -100,6 +122,20 @@ command_palette.no_results:
   en: No matching tasks or commands
 command_palette.no_results_hint:
   en: Try a task title, message, project, setting, or command
+command_palette.no_matching_providers:
+  en: No matching providers
+command_palette.loading_sessions:
+  en: Loading terminal sessions…
+command_palette.no_resume_sessions:
+  en: No resumable terminal sessions
+command_palette.no_resume_sessions_hint:
+  en: Sessions already in Waku are hidden. Start one in an agent CLI and try again.
+command_palette.could_not_load_sessions:
+  en: Couldn’t load terminal sessions
+command_palette.loading_selected_session:
+  en: Loading conversation…
+command_palette.resume_failed:
+  en: "Couldn’t resume session: %{error}"
 
 language.title:
   en: Language
@@ -154,6 +190,278 @@ pi_ext.compat_generic:
   en: Compatible
   ja: 互換
   zh-CN: 兼容
+pi_ext.check_update:
+  en: Check
+  ja: 更新確認
+  zh-CN: 检查更新
+pi_ext.checking_update:
+  en: Checking…
+  ja: 確認中…
+  zh-CN: 检查中…
+pi_ext.update:
+  en: Update
+  ja: 更新
+  zh-CN: 更新
+pi_ext.update_available:
+  en: Update available
+  ja: 更新あり
+  zh-CN: 有可用更新
+pi_ext.up_to_date:
+  en: Up to date
+  ja: 最新です
+  zh-CN: 已是最新
+pi_ext.update_unavailable:
+  en: Unavailable
+  ja: 利用不可
+  zh-CN: 不可用
+pi_ext.remove:
+  en: Remove
+  ja: 削除
+  zh-CN: 移除
+pi_ext.confirm_remove:
+  en: Confirm remove
+  ja: 削除を確認
+  zh-CN: 再次确认移除
+pi_ext.enable_before_remove:
+  en: Enable before removing
+  ja: 削除する前に有効化してください
+  zh-CN: 请先启用再移除
+pi_ext.updated_toast:
+  en: Extension updated; new Pi sessions will use it.
+  ja: 拡張機能を更新しました。新しい Pi セッションで使用されます。
+  zh-CN: 插件已更新；新开的 Pi 会话将使用新版本。
+pi_ext.removed_toast:
+  en: Extension removed; new Pi sessions will use the change.
+  ja: 拡張機能を削除しました。新しい Pi セッションから反映されます。
+  zh-CN: 插件已移除；新开的 Pi 会话将应用此更改。
+pi_ext.action_failed:
+  en: "Extension action failed: %{error}"
+  ja: "拡張機能の操作に失敗しました: %{error}"
+  zh-CN: "插件操作失败：%{error}"
+pi_ext.discovered_read_only:
+  en: Discovered by Pi; read-only
+  ja: Pi による自動検出（読み取り専用）
+  zh-CN: 由 Pi 自动发现；只读
+pi_settings.general:
+  en: General
+  ja: 一般
+  zh-CN: 通用
+pi_settings.extensions:
+  en: Extensions
+  ja: 拡張機能
+  zh-CN: 插件
+pi_settings.providers:
+  en: Providers
+  ja: プロバイダー
+  zh-CN: 服务商
+pi_settings.models_path:
+  en: Models path
+  ja: モデルパス
+  zh-CN: 模型路径
+pi_settings.provider_editor:
+  en: Provider editor
+  ja: プロバイダー編集
+  zh-CN: 服务商编辑
+pi_settings.provider_key_hint:
+  en: API keys are never shown; leave the field empty to keep the current key.
+  ja: API キーは表示されません。現在のキーを維持するには空欄にしてください。
+  zh-CN: API key 不会回显；留空可保留当前 key。
+pi_settings.provider_id_placeholder:
+  en: Provider ID
+  ja: プロバイダー ID
+  zh-CN: 服务商 ID
+pi_settings.provider_name_placeholder:
+  en: Display name
+  ja: 表示名
+  zh-CN: 显示名称
+pi_settings.provider_base_url_placeholder:
+  en: Base URL
+  ja: ベース URL
+  zh-CN: 基础 URL
+pi_settings.provider_api_placeholder:
+  en: API
+  ja: API
+  zh-CN: API
+pi_settings.provider_api_key_placeholder:
+  en: API key (blank = unchanged)
+  ja: API キー（空欄で変更なし）
+  zh-CN: API key（留空不变）
+pi_settings.supported_apis:
+  en: "Supported APIs: openai-completions, openai-responses, anthropic-messages, google-generative-ai"
+  ja: "対応 API: openai-completions、openai-responses、anthropic-messages、google-generative-ai"
+  zh-CN: "支持 API：openai-completions、openai-responses、anthropic-messages、google-generative-ai"
+pi_settings.model_provider_placeholder:
+  en: Provider ID
+  ja: プロバイダー ID
+  zh-CN: 服务商 ID
+pi_settings.model_id_placeholder:
+  en: Model ID
+  ja: モデル ID
+  zh-CN: 模型 ID
+pi_settings.model_name_placeholder:
+  en: Model name
+  ja: モデル名
+  zh-CN: 模型名称
+pi_settings.model_api_placeholder:
+  en: API override (optional)
+  ja: API 上書き（任意）
+  zh-CN: API 覆盖（可选）
+pi_settings.model_reasoning_placeholder:
+  en: "Reasoning: true/false"
+  ja: "推論: true/false"
+  zh-CN: "推理：true/false"
+pi_settings.model_input_placeholder:
+  en: "Input: text or text+image"
+  ja: "入力: text または text+image"
+  zh-CN: "输入：text 或 text+image"
+pi_settings.model_context_placeholder:
+  en: Context window
+  ja: コンテキストウィンドウ
+  zh-CN: 上下文窗口
+pi_settings.model_max_tokens_placeholder:
+  en: Max tokens
+  ja: 最大トークン数
+  zh-CN: 最大令牌数
+pi_settings.save_provider:
+  en: Save provider
+  ja: プロバイダーを保存
+  zh-CN: 保存服务商
+pi_settings.new_provider:
+  en: New provider
+  ja: 新しいプロバイダー
+  zh-CN: 新建服务商
+pi_settings.clear_api_key:
+  en: Clear API key
+  ja: API キーを消去
+  zh-CN: 清除 API key
+pi_settings.edit:
+  en: Edit
+  ja: 編集
+  zh-CN: 编辑
+pi_settings.delete:
+  en: Delete
+  ja: 削除
+  zh-CN: 删除
+pi_settings.confirm_delete:
+  en: Confirm delete
+  ja: 削除を確認
+  zh-CN: 确认删除
+pi_settings.new_model:
+  en: New model
+  ja: 新しいモデル
+  zh-CN: 新建模型
+pi_settings.save_model:
+  en: Save model
+  ja: モデルを保存
+  zh-CN: 保存模型
+pi_settings.no_providers:
+  en: No custom providers configured.
+  ja: カスタムプロバイダーは設定されていません。
+  zh-CN: 未配置自定义服务商。
+pi_settings.no_models:
+  en: No models configured.
+  ja: モデルは設定されていません。
+  zh-CN: 未配置模型。
+pi_settings.api_key_configured:
+  en: API key configured
+  ja: API キー設定済み
+  zh-CN: 已配置 API key
+pi_settings.api_key_not_configured:
+  en: API key not configured
+  ja: API キー未設定
+  zh-CN: 未配置 API key
+pi_settings.read_only_provider:
+  en: Unsupported provider API; read-only.
+  ja: 未対応のプロバイダー API のため読み取り専用です。
+  zh-CN: 不支持的服务商 API；只读。
+pi_settings.extension_settings:
+  en: Extension Settings
+  ja: 拡張設定
+  zh-CN: 插件设置
+pi_settings.advanced:
+  en: Advanced
+  ja: 詳細設定
+  zh-CN: 高级
+pi_settings.default_provider:
+  en: Default provider
+  ja: デフォルトプロバイダー
+  zh-CN: 默认服务商
+pi_settings.default_model:
+  en: Default model
+  ja: デフォルトモデル
+  zh-CN: 默认模型
+pi_settings.default_thinking_level:
+  en: Default thinking level
+  ja: デフォルト思考レベル
+  zh-CN: 默认思考级别
+pi_settings.quiet_startup:
+  en: Quiet startup
+  ja: 静かな起動
+  zh-CN: 静默启动
+pi_settings.quiet_startup_description:
+  en: Start Pi without its startup banner.
+  ja: 起動バナーを表示せずに Pi を起動します。
+  zh-CN: 启动 Pi 时不显示启动横幅。
+pi_settings.not_set:
+  en: Not set
+  ja: 未設定
+  zh-CN: 未设置
+pi_settings.loading:
+  en: Loading Pi settings…
+  ja: Pi 設定を読み込み中…
+  zh-CN: 正在读取 Pi 设置…
+pi_settings.unavailable:
+  en: Unavailable
+  ja: 利用不可
+  zh-CN: 不可用
+pi_settings.no_extensions:
+  en: No Pi extensions found.
+  ja: Pi 拡張機能はありません。
+  zh-CN: 未找到 Pi 插件。
+pi_settings.no_extension_settings:
+  en: No extension settings in this scope.
+  ja: このスコープに拡張設定はありません。
+  zh-CN: 此范围没有插件设置。
+pi_settings.no_project_settings:
+  en: No project scopes are configured.
+  ja: プロジェクトスコープは設定されていません。
+  zh-CN: 未配置项目范围。
+pi_settings.global:
+  en: Global
+  ja: グローバル
+  zh-CN: 全局
+pi_settings.project:
+  en: Project
+  ja: プロジェクト
+  zh-CN: 项目
+pi_settings.config_path:
+  en: Global config path
+  ja: グローバル設定パス
+  zh-CN: 全局配置路径
+pi_settings.open_config:
+  en: Open config
+  ja: 設定を開く
+  zh-CN: 打开配置
+pi_settings.reveal_config:
+  en: Reveal config
+  ja: 設定を表示
+  zh-CN: 在文件管理器中显示
+pi_settings.remote_unavailable:
+  en: Config files are on the daemon host, so desktop file actions are unavailable for a remote connection.
+  ja: 設定ファイルはデーモンホスト上にあるため、リモート接続ではデスクトップのファイル操作を利用できません。
+  zh-CN: 配置文件位于守护进程主机上，远程连接不可使用桌面文件操作。
+pi_settings.reload_runtime:
+  en: Reload Pi runtime
+  ja: Pi ランタイムを再読み込み
+  zh-CN: 重载 Pi 运行时
+pi_settings.reload_runtime_description:
+  en: Reload the selected live Pi session; its next prompt will start from the same cursor.
+  ja: 選択中の実行中 Pi セッションを再読み込みします。次のプロンプトは同じカーソルから再開します。
+  zh-CN: 重载当前运行中的 Pi 会话；下一条提示会从相同游标继续。
+pi_settings.runtime_reloaded:
+  en: Pi runtime reloaded
+  ja: Pi ランタイムを再読み込みしました
+  zh-CN: Pi 运行时已重载
 settings.usage:
   en: Usage
 settings.daemon:
@@ -1156,6 +1464,8 @@ commands.fast_disabled:
   en: Fast mode disabled
 commands.goal_description:
   en: Set a goal this task keeps pursuing
+commands.resume_description:
+  en: Resume a terminal agent session
 
 goal.title:
   en: Goal
@@ -1575,6 +1885,10 @@ environment.commit_or_push:
   en: Commit or push
 environment.compare_branch:
   en: Compare branch
+environment.task_id:
+  en: Task ID
+environment.agent_cli_thread_id:
+  en: Agent CLI thread ID
 
 commit.message_placeholder:
   en: Commit message (leave blank to generate)…

@@ -14,6 +14,8 @@ mod support;
 mod title_refresh;
 mod tool_progress;
 
+pub(crate) use acp::catalog_agent;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

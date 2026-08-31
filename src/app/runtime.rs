@@ -52,7 +52,7 @@ fn attach_driver(
         supports_steer,
     } = response
     else {
-        anyhow::bail!("Waku daemon returned an invalid runtime attachment response");
+        anyhow::bail!("Piwaku daemon returned an invalid runtime attachment response");
     };
     let Some(runtime_id) = runtime_id else {
         return Ok(None);
@@ -84,7 +84,7 @@ fn load_remote_task_state(
         ..
     } = response
     else {
-        anyhow::bail!("Waku daemon returned an invalid task-state response");
+        anyhow::bail!("Piwaku daemon returned an invalid task-state response");
     };
     for session in &mut sessions {
         session.detail_loaded = false;
@@ -2889,6 +2889,7 @@ impl Waku {
                 pending_permission: None,
                 pending_user_input: None,
                 todo_state: None,
+                magic_context_status: None,
                 pending_computer_approval: None,
                 computer_use_previews: Vec::new(),
                 computer_session_grants: HashSet::new(),

@@ -496,6 +496,34 @@ impl Waku {
                     }
                 }
             }
+            DriverEvent::InteractionModeUpdated(mode) => {
+                // A provider-owned mode transition is already authoritative;
+                // update the projection only. Calling the UI mode setter here
+                // would re-apply session options and create a feedback loop.
+                let changed = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(|session| session.interaction_mode != mode);
+                if changed && let Some(session) = self.state.session_mut(session_id) {
+                    session.interaction_mode = mode;
+                }
+            }
+            DriverEvent::Notification { message, level } => {
+                // Routine extension lifecycle messages stay below the
+                // composer; only warning/error notifications interrupt.
+                match pi_notification_presentation(&level) {
+                    PiNotificationPresentation::Inline => {
+                        self.show_inline_pi_notification(session_id, message, cx);
+                    }
+                    PiNotificationPresentation::Alert => self.show_toast(message),
+                }
+            }
+            DriverEvent::MagicContextStatusUpdated(status) => {
+                runtime.magic_context_status = status;
+                cx.notify();
+            }
             DriverEvent::UsageUpdated {
                 context_tokens,
                 context_window,

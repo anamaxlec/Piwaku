@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 
 use crate::WireDriverEvent;
 use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
-use crate::model::{ActivityKind, DriverEvent, PermissionOption, UserInputQuestion};
+use crate::model::{
+    ActivityKind, DriverEvent, MagicContextStatus, PermissionOption, UserInputQuestion,
+};
 
 pub fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
     serde_json::from_value(Value::String(value.to_owned()))
@@ -108,6 +110,16 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
+        DriverEvent::InteractionModeUpdated(mode) => {
+            ("interactionModeUpdated", serde_json::to_value(mode)?)
+        }
+        DriverEvent::Notification { message, level } => (
+            "notification",
+            json!({ "message": message, "level": level }),
+        ),
+        DriverEvent::MagicContextStatusUpdated(status) => {
+            ("magicContextStatusUpdated", serde_json::to_value(status)?)
+        }
         DriverEvent::TurnFinished { success, summary } => (
             "turnFinished",
             json!({ "success": success, "summary": summary }),
@@ -190,6 +202,21 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
+        "interactionModeUpdated" => {
+            DriverEvent::InteractionModeUpdated(serde_json::from_value(payload)?)
+        }
+        "notification" => {
+            let notification: NotificationWire = serde_json::from_value(payload)?;
+            DriverEvent::Notification {
+                message: notification.message,
+                level: notification.level,
+            }
+        }
+        "magicContextStatusUpdated" => {
+            DriverEvent::MagicContextStatusUpdated(serde_json::from_value::<
+                Option<MagicContextStatus>,
+            >(payload)?)
+        }
         "turnFinished" => {
             let finished: TurnFinishedWire = serde_json::from_value(payload)?;
             DriverEvent::TurnFinished {
@@ -229,6 +256,13 @@ struct UserInputWire {
     questions: Vec<UserInputQuestion>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationWire {
+    message: String,
+    level: String,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ComputerUseWire {
@@ -265,7 +299,9 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion};
+    use crate::model::{
+        InteractionMode, ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion,
+    };
 
     #[test]
     fn goal_updates_round_trip_through_the_daemon_wire() {
@@ -323,5 +359,45 @@ mod tests {
         assert_eq!(request_id, "request-1");
         assert_eq!(questions[0].id, "deployment");
         assert_eq!(questions[0].options[0].label, "Preview");
+    }
+
+    #[test]
+    fn interaction_mode_updates_round_trip_through_the_daemon_wire() {
+        let wire =
+            event_to_wire(DriverEvent::InteractionModeUpdated(InteractionMode::Plan)).unwrap();
+        assert_eq!(wire.kind, "interactionModeUpdated");
+        assert_eq!(wire.payload, "plan");
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::InteractionModeUpdated(InteractionMode::Plan)
+        ));
+    }
+
+    #[test]
+    fn magic_status_and_notification_round_trip() {
+        let status =
+            DriverEvent::MagicContextStatusUpdated(Some(crate::model::MagicContextStatus {
+                title: "Magic Context".into(),
+                text: "12k / 32k".into(),
+                level: "info".into(),
+            }));
+        let wire = event_to_wire(status).unwrap();
+        assert_eq!(wire.kind, "magicContextStatusUpdated");
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::MagicContextStatusUpdated(Some(status))
+                if status.text == "12k / 32k"
+        ));
+
+        let wire = event_to_wire(DriverEvent::Notification {
+            message: "shown".into(),
+            level: "warning".into(),
+        })
+        .unwrap();
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::Notification { message, level }
+                if message == "shown" && level == "warning"
+        ));
     }
 }

@@ -45,7 +45,7 @@ pub(crate) fn start_remote(
     };
     let supports_steer = match client.request(session_id, runtime_id, command) {
         Ok(waku_client::ResponsePayload::Started { supports_steer }) => supports_steer,
-        Ok(_) => anyhow::bail!("Waku daemon returned an invalid start response"),
+        Ok(_) => anyhow::bail!("Piwaku daemon returned an invalid start response"),
         Err(error) => return Err(error),
     };
     connect_remote(
@@ -124,7 +124,7 @@ fn connect_remote(
                             let event = match waku_client::event_from_wire(sequenced.event) {
                                 Ok(event) => event,
                                 Err(error) => DriverEvent::Error(format!(
-                                    "Waku daemon sent an invalid event: {error}"
+                                    "Piwaku daemon sent an invalid event: {error}"
                                 )),
                             };
                             let process_exited = matches!(&event, DriverEvent::ProcessExited);
@@ -183,7 +183,7 @@ fn connect_remote(
                     }
                     Ok(_) => {
                         let _ = forwarding_events.send(DriverEvent::Error(
-                            "Waku daemon returned an invalid runtime attachment response".into(),
+                            "Piwaku daemon returned an invalid runtime attachment response".into(),
                         ));
                         break;
                     }
@@ -227,7 +227,7 @@ impl RemoteDriverControl {
         let client = self.client.lock().clone();
         if let Err(error) = client.notify(self.session_id, self.runtime_id, command) {
             let _ = self.events.send(DriverEvent::Error(format!(
-                "Waku daemon command failed: {error}"
+                "Piwaku daemon command failed: {error}"
             )));
         }
     }
@@ -348,7 +348,7 @@ impl DriverControl for RemoteDriverControl {
                 .map(serde_json::from_value)
                 .transpose()
                 .map_err(Into::into),
-            _ => anyhow::bail!("Waku daemon returned an invalid rollback response"),
+            _ => anyhow::bail!("Piwaku daemon returned an invalid rollback response"),
         }
     }
 
@@ -362,7 +362,7 @@ impl DriverControl for RemoteDriverControl {
             waku_client::ResponsePayload::Cursor {
                 cursor: Some(cursor),
             } => serde_json::from_value(cursor).map_err(Into::into),
-            _ => anyhow::bail!("Waku daemon returned an invalid fork response"),
+            _ => anyhow::bail!("Piwaku daemon returned an invalid fork response"),
         }
     }
 

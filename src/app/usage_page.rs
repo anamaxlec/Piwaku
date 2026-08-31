@@ -54,6 +54,8 @@ impl Waku {
         }
         if page == SettingsPage::Pi {
             self.ensure_pi_extensions(false, cx);
+            self.ensure_pi_settings(false, cx);
+            self.ensure_pi_provider_settings(false, cx);
         }
         cx.notify();
     }

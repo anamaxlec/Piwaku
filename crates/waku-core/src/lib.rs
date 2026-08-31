@@ -17,11 +17,14 @@ macro_rules! tr {
     };
 }
 
+pub mod acp_session;
 pub mod amp_session;
 pub mod attachments;
 pub mod blob_store;
 pub mod checkpoint;
+mod claude_metadata;
 pub mod claude_session;
+pub mod codex_session;
 pub mod command_env;
 pub mod composer_complete;
 pub mod computer_use;
@@ -42,6 +45,8 @@ pub mod model_catalog;
 pub mod opencode_pool;
 pub mod opencode_session;
 pub mod persistence;
+pub mod pi_provider_settings;
+pub mod pi_session;
 pub mod pi_settings;
 pub mod projectless;
 pub mod settings;

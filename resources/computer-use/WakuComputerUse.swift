@@ -18,7 +18,7 @@ private let maximumPreviewHeight = 480
 private let previewFramesPerSecond: Int32 = 15
 private let helperDisplayName =
     (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-    ?? "Waku Computer Use"
+    ?? "Piwaku Computer Use"
 
 struct Permissions: Codable {
     let screenRecording: Bool
@@ -133,7 +133,7 @@ private final class ComputerUseStatusItem {
         guard item == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.length = 54
-        item.button?.toolTip = "Waku Computer Use"
+        item.button?.toolTip = "Piwaku Computer Use"
         self.item = item
     }
 
@@ -162,7 +162,7 @@ private final class ComputerUseStatusItem {
         item.length = image.size.width
         item.button?.image = image
         let menu = NSMenu()
-        let title = NSMenuItem(title: "Waku Computer Use", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: "Piwaku Computer Use", action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
         menu.addItem(.separator())
@@ -525,11 +525,11 @@ enum HelperError: LocalizedError {
         switch self {
         case .invalidRequest(let message): message
         case .ipc(let message): "Computer Use connection failed: \(message)"
-        case .missingPermission(let permission): "\(helperDisplayName) needs \(permission) access. Open Waku Settings > Computer Use to grant it."
-        case .unauthorizedClient(let reason): "Computer Use rejected a request that did not come from a trusted Waku app: \(reason)"
+        case .missingPermission(let permission): "\(helperDisplayName) needs \(permission) access. Open Piwaku Settings > Computer Use to grant it."
+        case .unauthorizedClient(let reason): "Computer Use rejected a request that did not come from a trusted Piwaku app: \(reason)"
         case .targetUnavailable: "The app has no available window. Retry get_app_state, or call list_apps() to confirm the app identifier."
         case .targetIdentityChanged: "The selected app window changed. Call get_app_state again before interacting."
-        case .targetBlocked: "Waku does not allow computer control of that app."
+        case .targetBlocked: "Piwaku does not allow computer control of that app."
         case .unsupportedAction(let action): "Unsupported computer-use action: \(action)"
         case .eventCreationFailed: "macOS could not create an input event."
         case .captureFailed: "macOS could not capture the selected app window."
@@ -858,7 +858,7 @@ struct WakuComputerUse {
                     result = [
                         "protocolVersion": "2025-06-18",
                         "capabilities": ["tools": ["listChanged": false]],
-                        "serverInfo": ["name": "Waku Computer Use", "version": "1.0.0"],
+                        "serverInfo": ["name": "Piwaku Computer Use", "version": "1.0.0"],
                     ]
                 case "tools/list":
                     result = ["tools": mcpTools()]
@@ -1415,7 +1415,7 @@ private func readExactly(_ count: Int, from input: FileHandle) throws -> Data? {
             if data.isEmpty {
                 return nil
             }
-            throw HelperError.ipc("the Waku connection closed mid-message")
+            throw HelperError.ipc("the Piwaku connection closed mid-message")
         }
         data.append(chunk)
     }
@@ -1570,7 +1570,7 @@ private func connectedChannel(at path: String) throws -> (FileHandle, pid_t) {
         var peerPID: pid_t = 0
         var peerPIDSize = socklen_t(MemoryLayout.size(ofValue: peerPID))
         guard getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &peerPID, &peerPIDSize) == 0 else {
-            throw HelperError.ipc("could not identify the Waku process")
+            throw HelperError.ipc("could not identify the Piwaku process")
         }
         return (FileHandle(fileDescriptor: descriptor, closeOnDealloc: true), peerPID)
     } catch {

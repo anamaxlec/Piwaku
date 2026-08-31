@@ -70,6 +70,7 @@ actions!(
         ToggleSidebar,
         ToggleRightPanel,
         ToggleCommandPalette,
+        OpenResumePicker,
         ToggleFpsCounter,
         NavigateBack,
         NavigateForward,
@@ -192,7 +193,7 @@ impl WakuApplicationExt for Application {
 
 pub fn run() {
     let daemon = crate::daemon::start_process()
-        .unwrap_or_else(|error| panic!("failed to start Waku daemon: {error:#}"));
+        .unwrap_or_else(|error| panic!("failed to start Piwaku daemon: {error:#}"));
     gpui_platform::application()
         .with_assets(crate::assets::Assets)
         .with_main_window_reopen()
@@ -215,9 +216,9 @@ pub fn run() {
             crate::theme::init(cx);
             crate::platform::init_reduce_motion(cx);
 
-            // Sparkle only runs from a bundled release build (or when forced
-            // via WAKU_FORCE_UPDATER=1); everywhere else the menu item is
-            // omitted along with the updater itself.
+            // Platform updaters only run from a supported release layout (or
+            // when explicitly forced for development); everywhere else the
+            // menu item is omitted along with the updater itself.
             let updater = crate::updater::Updater::init();
             let updater_available = updater.is_some();
             cx.set_global(crate::updater::UpdaterState(updater));
@@ -369,7 +370,7 @@ pub fn run() {
                         waku
                     },
                 )
-                .expect("failed to open Waku window");
+                .expect("failed to open Piwaku window");
 
             cx.on_system_notification_response({
                 let window = window;
@@ -400,6 +401,9 @@ pub fn run() {
                 .ok();
 
             set_app_menus(cx, updater_available);
+            // A Linux handoff retains the previous prefix until this freshly
+            // relaunched build has successfully opened its main window.
+            crate::updater::signal_relaunch_ready();
         });
 }
 

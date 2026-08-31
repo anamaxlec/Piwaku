@@ -32,13 +32,24 @@ updater.updating: 正在更新…
 updater.up_to_date: Waku 已是最新版本
 updater.failed: "更新失败：%{error}"
 command_palette.placeholder: 搜索任务或运行命令…
+command_palette.resume_placeholder: 搜索终端会话…
+command_palette.resume_provider_placeholder: 选择服务商…
 command_palette.suggested: 建议
 command_palette.tasks: 任务
+command_palette.sessions: 终端会话
+command_palette.providers: 服务商
 command_palette.commands: 命令
 command_palette.settings: 设置
 command_palette.new_task: 新建任务
+command_palette.resume: 恢复…
+command_palette.change_provider: 更改服务商
+command_palette.current_provider: 当前服务商
 command_palette.open_project: 打开项目…
 command_palette.choose_model: 选择模型…
+command_palette.copy_task_id: 复制任务 ID
+command_palette.copy_agent_cli_thread_id: 复制智能体 CLI 线程 ID
+command_palette.task_id_copied: 已复制任务 ID
+command_palette.agent_cli_thread_id_copied: 已复制智能体 CLI 线程 ID
 command_palette.collapse_sidebar_groups: 折叠所有侧边栏分组
 command_palette.show_sidebar: 显示侧边栏
 command_palette.hide_sidebar: 隐藏侧边栏
@@ -49,6 +60,13 @@ command_palette.you: 你
 command_palette.agent: 智能体
 command_palette.no_results: 未找到匹配的任务或命令
 command_palette.no_results_hint: 可尝试搜索任务标题、消息、项目、设置或命令
+command_palette.no_matching_providers: 未找到匹配的服务商
+command_palette.loading_sessions: 正在加载终端会话…
+command_palette.no_resume_sessions: 没有可恢复的终端会话
+command_palette.no_resume_sessions_hint: 已在 Waku 中的会话不会显示。请在智能体 CLI 中开始会话后重试。
+command_palette.could_not_load_sessions: 无法加载终端会话
+command_palette.loading_selected_session: 正在加载对话…
+command_palette.resume_failed: "无法恢复会话：%{error}"
 language.title: 语言
 language.system: 跟随系统
 language.description: 选择 Waku 的界面语言
@@ -65,6 +83,74 @@ pi_ext.compat_native: 原生适配
 pi_ext.compat_replaced: "Waku 已接管"
 pi_ext.compat_tui_only: 仅 TUI
 pi_ext.compat_generic: 兼容
+pi_ext.check_update: 检查更新
+pi_ext.checking_update: 检查中…
+pi_ext.update: 更新
+pi_ext.update_available: 有可用更新
+pi_ext.up_to_date: 已是最新
+pi_ext.update_unavailable: 不可用
+pi_ext.remove: 移除
+pi_ext.confirm_remove: 再次确认移除
+pi_ext.enable_before_remove: 请先启用再移除
+pi_ext.updated_toast: 插件已更新；新开的 Pi 会话将使用新版本。
+pi_ext.removed_toast: 插件已移除；新开的 Pi 会话将应用此更改。
+pi_ext.action_failed: "插件操作失败：%{error}"
+pi_ext.discovered_read_only: 由 Pi 自动发现；只读
+pi_settings.general: 通用
+pi_settings.extensions: 插件
+pi_settings.providers: 服务商
+pi_settings.models_path: 模型路径
+pi_settings.provider_editor: 服务商编辑
+pi_settings.provider_key_hint: API key 不会回显；留空可保留当前 key。
+pi_settings.provider_id_placeholder: 服务商 ID
+pi_settings.provider_name_placeholder: 显示名称
+pi_settings.provider_base_url_placeholder: 基础 URL
+pi_settings.provider_api_placeholder: API
+pi_settings.provider_api_key_placeholder: API key（留空不变）
+pi_settings.supported_apis: "支持 API：openai-completions、openai-responses、anthropic-messages、google-generative-ai"
+pi_settings.model_provider_placeholder: 服务商 ID
+pi_settings.model_id_placeholder: 模型 ID
+pi_settings.model_name_placeholder: 模型名称
+pi_settings.model_api_placeholder: API 覆盖（可选）
+pi_settings.model_reasoning_placeholder: "推理：true/false"
+pi_settings.model_input_placeholder: "输入：text 或 text+image"
+pi_settings.model_context_placeholder: 上下文窗口
+pi_settings.model_max_tokens_placeholder: 最大令牌数
+pi_settings.save_provider: 保存服务商
+pi_settings.new_provider: 新建服务商
+pi_settings.clear_api_key: 清除 API key
+pi_settings.edit: 编辑
+pi_settings.delete: 删除
+pi_settings.confirm_delete: 确认删除
+pi_settings.new_model: 新建模型
+pi_settings.save_model: 保存模型
+pi_settings.no_providers: 未配置自定义服务商。
+pi_settings.no_models: 未配置模型。
+pi_settings.api_key_configured: 已配置 API key
+pi_settings.api_key_not_configured: 未配置 API key
+pi_settings.read_only_provider: 不支持的服务商 API；只读。
+pi_settings.extension_settings: 插件设置
+pi_settings.advanced: 高级
+pi_settings.default_provider: 默认服务商
+pi_settings.default_model: 默认模型
+pi_settings.default_thinking_level: 默认思考级别
+pi_settings.quiet_startup: 静默启动
+pi_settings.quiet_startup_description: 启动 Pi 时不显示启动横幅。
+pi_settings.not_set: 未设置
+pi_settings.loading: 正在读取 Pi 设置…
+pi_settings.unavailable: 不可用
+pi_settings.no_extensions: 未找到 Pi 插件。
+pi_settings.no_extension_settings: 此范围没有插件设置。
+pi_settings.no_project_settings: 未配置项目范围。
+pi_settings.global: 全局
+pi_settings.project: 项目
+pi_settings.config_path: 全局配置路径
+pi_settings.open_config: 打开配置
+pi_settings.reveal_config: 在文件管理器中显示
+pi_settings.remote_unavailable: 配置文件位于守护进程主机上，远程连接不可使用桌面文件操作。
+pi_settings.reload_runtime: 重载 Pi 运行时
+pi_settings.reload_runtime_description: 重载当前运行中的 Pi 会话；下一条提示会从相同游标继续。
+pi_settings.runtime_reloaded: Pi 运行时已重载
 settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作
@@ -541,6 +627,7 @@ commands.fast_description: 切换快速模式
 commands.fast_enabled: 已启用快速模式
 commands.fast_disabled: 已关闭快速模式
 commands.goal_description: 为此任务设定一个持续追求的目标
+commands.resume_description: 恢复终端智能体会话
 goal.title: 目标
 goal.objective_placeholder: 这个任务应该持续朝什么方向努力？
 goal.set: 设定目标
@@ -740,6 +827,8 @@ environment.summary: 环境和后台工作
 environment.changes: 更改
 environment.commit_or_push: 提交或推送
 environment.compare_branch: 比较分支
+environment.task_id: 任务 ID
+environment.agent_cli_thread_id: 智能体 CLI 线程 ID
 commit.message_placeholder: 提交信息（留空以自动生成）…
 commit.message: 提交信息
 commit.include_unstaged: 包含未暂存的更改

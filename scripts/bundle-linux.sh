@@ -13,13 +13,18 @@ archive="$target_dir/release/$package.tar.gz"
 staging="$(mktemp -d)"
 trap 'rm -rf -- "$staging"' EXIT
 
-cargo build --locked --release --package waku --bin waku --package waku-daemon --bin waku-daemon
+cargo build --locked --release \
+  --package waku --bin waku --bin waku-updater \
+  --package waku-daemon --bin waku-daemon
 
 package_dir="$staging/$package"
 install -Dm755 "$target_dir/release/waku" "$package_dir/bin/waku"
+install -Dm755 "$target_dir/release/waku-updater" "$package_dir/bin/waku-updater"
 install -Dm755 "$target_dir/release/waku-daemon" "$package_dir/bin/waku-daemon"
 install -Dm644 resources/linux/sh.waku.desktop \
   "$package_dir/share/applications/sh.waku.desktop"
+install -Dm644 resources/linux/self-update-v1 \
+  "$package_dir/share/waku/self-update-v1"
 install -Dm644 website/public/app-icon.png \
   "$package_dir/share/icons/hicolor/256x256/apps/sh.waku.png"
 install -Dm644 LICENSE "$package_dir/share/licenses/waku/LICENSE"
