@@ -1,12 +1,10 @@
 //! Platform build metadata.
 //!
-//! Every native updater verifies the public release key exported here. On
-//! Windows, Explorer, the taskbar, and the Programs list also read the icon
-//! and version block out of the PE image itself.
+//! On Windows, Explorer, the taskbar, and the Programs list also read the
+//! icon and version block out of the PE image itself.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    export_sparkle_public_key();
 
     #[cfg(target_os = "windows")]
     {
@@ -15,31 +13,6 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=/stack:{}", 8 * 1024 * 1024);
         embed_windows_resources();
     }
-}
-
-/// Republish `SUPublicEDKey` from the macOS Info.plist as a compile-time
-/// constant.
-///
-/// The Linux and Windows updaters verify the same EdDSA signatures
-/// `generate_appcast` writes, against the same key. Reading the plist here
-/// rather than repeating the key in Rust means the platforms cannot drift
-/// into a feed the app rejects.
-fn export_sparkle_public_key() {
-    const PLIST: &str = "resources/Info.plist";
-    const KEY: &str = "<key>SUPublicEDKey</key>";
-
-    println!("cargo:rerun-if-changed={PLIST}");
-
-    let plist = std::fs::read_to_string(PLIST).expect("read the app Info.plist");
-    let value = plist
-        .split_once(KEY)
-        .and_then(|(_, rest)| rest.split_once("<string>"))
-        .and_then(|(_, rest)| rest.split_once("</string>"))
-        .map(|(value, _)| value.trim())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| panic!("{PLIST} has no SUPublicEDKey"));
-
-    println!("cargo:rustc-env=WAKU_SPARKLE_PUBLIC_ED_KEY={value}");
 }
 
 #[cfg(target_os = "windows")]

@@ -87,8 +87,6 @@ const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
 const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
 const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;
-const UPDATER_BUTTON_COLLAPSED_WIDTH: f32 = 20.0;
-const UPDATER_BUTTON_EXPANDED_WIDTH: f32 = 58.0;
 const RIGHT_PANEL_MIN_WIDTH: f32 = 280.0;
 const RIGHT_PANEL_MAX_WIDTH: f32 = 1000.0;
 const DEFAULT_FILE_TREE_WIDTH: f32 = 184.0;
@@ -1097,19 +1095,6 @@ pub struct Waku {
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
-    /// Mirror of Sparkle's persisted automatic-check setting. Refreshed when
-    /// settings opens and on toggle, so frames never read user defaults —
-    /// that lookup can reach cfprefsd.
-    automatic_updates_enabled: bool,
-    updater_status: crate::updater::UpdateStatus,
-    updater_button_focus: FocusHandle,
-    updater_button_hovered: bool,
-    updater_button_focused: bool,
-    updater_button_width: Rc<Cell<f32>>,
-    updater_button_label_reveal: Rc<Cell<f32>>,
-    updater_button_animation_from_width: f32,
-    updater_button_animation_from_reveal: f32,
-    updater_button_animation_generation: u64,
     probes: Vec<ProviderProbe>,
     provider_probe_tx: Sender<ProviderProbe>,
     provider_probe_events: Receiver<ProviderProbe>,
@@ -1794,84 +1779,6 @@ fn migrate_legacy_projectless_projects(
 }
 
 impl Waku {
-    fn updater_button_expanded(&self) -> bool {
-        self.updater_button_hovered || self.updater_button_focused
-    }
-
-    fn begin_updater_button_animation(&mut self, cx: &mut Context<Self>) {
-        self.updater_button_animation_from_width = self.updater_button_width.get();
-        self.updater_button_animation_from_reveal = self.updater_button_label_reveal.get();
-        self.updater_button_animation_generation = self
-            .updater_button_animation_generation
-            .wrapping_add(1)
-            .max(1);
-        cx.notify();
-    }
-
-    fn set_updater_button_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
-        if self.updater_button_hovered == hovered {
-            return;
-        }
-        let was_expanded = self.updater_button_expanded();
-        self.updater_button_hovered = hovered;
-        if was_expanded != self.updater_button_expanded() {
-            self.begin_updater_button_animation(cx);
-        }
-    }
-
-    fn set_updater_button_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        if self.updater_button_focused == focused {
-            return;
-        }
-        let was_expanded = self.updater_button_expanded();
-        self.updater_button_focused = focused;
-        if was_expanded != self.updater_button_expanded() {
-            self.begin_updater_button_animation(cx);
-        }
-    }
-
-    fn reset_updater_button_animation(&mut self) {
-        self.updater_button_hovered = false;
-        self.updater_button_focused = false;
-        self.updater_button_width
-            .set(UPDATER_BUTTON_COLLAPSED_WIDTH);
-        self.updater_button_label_reveal.set(0.0);
-        self.updater_button_animation_from_width = UPDATER_BUTTON_COLLAPSED_WIDTH;
-        self.updater_button_animation_from_reveal = 0.0;
-        self.updater_button_animation_generation = 0;
-    }
-
-    fn handle_updater_event(
-        &mut self,
-        event: crate::updater::UpdaterEvent,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            crate::updater::UpdaterEvent::StatusChanged(status) => {
-                self.updater_status = status;
-                self.reset_updater_button_animation();
-            }
-            crate::updater::UpdaterEvent::UpToDate => {
-                self.updater_status = crate::updater::UpdateStatus::Idle;
-                self.reset_updater_button_animation();
-                self.show_success_toast(tr!("updater.up_to_date"));
-            }
-            crate::updater::UpdaterEvent::Failed(error) => {
-                self.updater_status = crate::updater::UpdateStatus::Idle;
-                self.reset_updater_button_animation();
-                self.show_toast(tr!("updater.failed", error = error));
-            }
-            #[cfg(target_os = "linux")]
-            crate::updater::UpdaterEvent::QuitAndInstall => {
-                // The helper has already validated both prefixes and now
-                // waits for GPUI's normal asynchronous quit hooks to finish
-                // saving drafts and window state before it swaps them.
-                cx.quit();
-            }
-        }
-        cx.notify();
-    }
-
     pub(super) fn show_toast(&mut self, message: impl Into<String>) {
         self.show_toast_with_tone(message, ToastTone::Alert);
     }
@@ -2448,16 +2355,10 @@ impl Waku {
         // surface falls back to freezing the page to a bitmap while an
         // overlay is open.
         let scene_overlay_enabled = window.enable_scene_overlay().is_ok();
-        let (updater_status, updater_events) = cx
-            .try_global::<crate::updater::UpdaterState>()
-            .and_then(|state| state.0.as_ref())
-            .map(|updater| (updater.status(), Some(updater.events())))
-            .unwrap_or_default();
         let entity = cx.new(|cx| {
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
             let onboarding_projectless_focus = cx.focus_handle();
-            let updater_button_focus = cx.focus_handle();
             let model_picker_empty_focus = cx.focus_handle();
             let task_switcher_focus = cx.focus_handle();
             cx.on_focus_out(
@@ -2471,31 +2372,6 @@ impl Waku {
             let mut task_switcher = task_switcher::TaskSwitcherUi::new(task_switcher_focus);
             if let Some(selected_session) = state.selected_session {
                 task_switcher.record_access(selected_session);
-            }
-
-            cx.on_focus(&updater_button_focus, window, |this: &mut Self, _, cx| {
-                this.set_updater_button_focused(true, cx);
-            })
-            .detach();
-            cx.on_blur(&updater_button_focus, window, |this: &mut Self, _, cx| {
-                this.set_updater_button_focused(false, cx);
-            })
-            .detach();
-
-            if let Some(updater_events) = updater_events {
-                cx.spawn(async move |this: WeakEntity<Self>, cx| {
-                    while let Ok(event) = updater_events.recv().await {
-                        if this
-                            .update(cx, |this: &mut Self, cx| {
-                                this.handle_updater_event(event, cx)
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                })
-                .detach();
             }
 
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
@@ -2904,19 +2780,6 @@ impl Waku {
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,
-                automatic_updates_enabled: cx
-                    .try_global::<crate::updater::UpdaterState>()
-                    .and_then(|updater| updater.0.as_ref())
-                    .is_some_and(|updater| updater.automatically_checks_for_updates()),
-                updater_status,
-                updater_button_focus,
-                updater_button_hovered: false,
-                updater_button_focused: false,
-                updater_button_width: Rc::new(Cell::new(UPDATER_BUTTON_COLLAPSED_WIDTH)),
-                updater_button_label_reveal: Rc::new(Cell::new(0.0)),
-                updater_button_animation_from_width: UPDATER_BUTTON_COLLAPSED_WIDTH,
-                updater_button_animation_from_reveal: 0.0,
-                updater_button_animation_generation: 0,
                 probes,
                 provider_probe_tx,
                 provider_probe_events,

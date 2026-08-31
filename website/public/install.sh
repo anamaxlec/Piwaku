@@ -1,28 +1,20 @@
 #!/usr/bin/env sh
 set -eu
 
-# Installs Waku for Linux into ~/.local — no root, no package manager.
-# Downloads the release tarball from https://releases.waku.sh, unpacks it as
-# ~/.local/waku.app, links the binary onto PATH, and registers the desktop
-# entry. docs/linux.md documents the equivalent manual steps.
-#
-#   curl -fsSL https://waku.sh/install.sh | sh
-#
-# Environment:
-#   WAKU_VERSION        install this version instead of the latest
-#   WAKU_BUNDLE_PATH    install a local tarball instead of downloading
-#   WAKU_RELEASES_URL   base URL to download from
+# Installs a locally produced Piwaku Linux archive into ~/.local without root.
+# Public Piwaku releases currently target macOS; use WAKU_BUNDLE_PATH for a
+# locally built Linux archive.
 
 usage() {
     cat <<'USAGE'
-Install Waku for Linux into ~/.local.
+Install a local Piwaku Linux archive into ~/.local.
 
 Usage:
-  curl -fsSL https://waku.sh/install.sh | sh
-  curl -fsSL https://waku.sh/install.sh | sh -s -- --uninstall
+  WAKU_BUNDLE_PATH=path/to/waku-<version>-<target>.tar.gz sh website/public/install.sh
+  sh website/public/install.sh --uninstall
 
 Options:
-  --uninstall   Remove Waku, leaving ~/.waku (projects and settings) alone
+  --uninstall   Remove Piwaku, leaving ~/.waku (projects and settings) alone
   --help        Show this help
 USAGE
 }
@@ -31,7 +23,6 @@ main() {
     app_dir="$HOME/.local/waku.app"
     bin_link="$HOME/.local/bin/waku"
     desktop_file="$HOME/.local/share/applications/sh.waku.desktop"
-    releases="${WAKU_RELEASES_URL:-https://releases.waku.sh}"
 
     case "${1:-}" in
         --uninstall) uninstall; return ;;
@@ -46,8 +37,8 @@ main() {
 
     platform="$(uname -s)"
     if [ "$platform" = "Darwin" ]; then
-        echo "Waku for macOS ships as a signed .dmg that updates itself." >&2
-        echo "Download it from https://waku.sh" >&2
+        echo "Piwaku for macOS ships as a signed .dmg." >&2
+        echo "Use the GitHub Releases page to download it." >&2
         exit 1
     fi
     if [ "$platform" != "Linux" ]; then
@@ -55,84 +46,41 @@ main() {
         exit 1
     fi
 
-    machine="$(uname -m)"
-    case "$machine" in
-        x86_64) target="x86_64-unknown-linux-gnu" ;;
-        aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
-        *)
-            echo "Unsupported architecture: $machine" >&2
-            echo "Build from source: https://github.com/egoist/waku" >&2
-            exit 1
-            ;;
-    esac
-
-    if command -v curl >/dev/null 2>&1; then
-        fetch() { command curl -fsSL "$1"; }
-    elif command -v wget >/dev/null 2>&1; then
-        fetch() { wget -qO- "$1"; }
-    else
-        echo "Could not find 'curl' or 'wget' in your PATH." >&2
+    if [ -z "${WAKU_BUNDLE_PATH:-}" ]; then
+        echo "Public Piwaku releases currently target macOS; set WAKU_BUNDLE_PATH to a local Linux archive." >&2
         exit 1
     fi
 
-    temp="$(mktemp -d "${TMPDIR:-/tmp}/waku-XXXXXX")"
+    temp="$(mktemp -d "${TMPDIR:-/tmp}/piwaku-XXXXXX")"
     staging="$app_dir.new"
     trap 'rm -rf -- "$temp" "$staging"' EXIT INT TERM
 
     archive="$temp/waku.tar.gz"
-    if [ -n "${WAKU_BUNDLE_PATH:-}" ]; then
-        cp "$WAKU_BUNDLE_PATH" "$archive"
-    else
-        version="${WAKU_VERSION:-}"
-        if [ -z "$version" ]; then
-            if ! version="$(fetch "$releases/latest-linux.txt")"; then
-                echo "Could not reach $releases/latest-linux.txt." >&2
-                echo "Pass WAKU_VERSION to install a specific version." >&2
-                exit 1
-            fi
-            version="$(printf '%s' "$version" | tr -d '[:space:]')"
-        fi
-        if [ -z "$version" ]; then
-            echo "No Waku version published for Linux yet." >&2
-            exit 1
-        fi
-        echo "Downloading Waku $version for $machine"
-        if ! fetch "$releases/waku-$version-$target.tar.gz" >"$archive"; then
-            echo "Download failed: $releases/waku-$version-$target.tar.gz" >&2
-            exit 1
-        fi
-    fi
+    cp "$WAKU_BUNDLE_PATH" "$archive"
     if ! tar -tzf "$archive" >/dev/null 2>&1; then
-        echo "Downloaded file is not a readable tarball." >&2
+        echo "The local file is not a readable tarball." >&2
         exit 1
     fi
 
-    # Unpack beside the target and swap only once the contents check out, so a
-    # truncated download cannot leave a working install in pieces. The tarball
-    # holds one versioned top-level directory; stripping it keeps every install
-    # at the same path.
+    # Unpack beside the target and swap only once the contents check out. The
+    # tarball holds one versioned top-level directory; stripping it keeps every
+    # install at the same path.
     echo "Installing to $app_dir"
     rm -rf "$staging"
     mkdir -p "$staging" "$(dirname "$bin_link")" "$(dirname "$desktop_file")"
     tar -xzf "$archive" --strip-components=1 -C "$staging"
 
-    # Waku resolves its daemon and self-update helper next to its own
-    # executable, so all three must stay together in bin/. Linking only the
-    # main binary onto PATH is safe — current_exe() resolves the symlink back
-    # into waku.app.
-    for binary in waku waku-daemon waku-updater; do
+    # Piwaku resolves its daemon next to its executable, so both must stay
+    # together in bin/. Linking only the main binary onto PATH is safe because
+    # current_exe() resolves the symlink back into waku.app.
+    for binary in waku waku-daemon; do
         if [ ! -x "$staging/bin/$binary" ]; then
             echo "Archive is missing bin/$binary." >&2
             exit 1
         fi
     done
-    if [ "$(cat "$staging/share/waku/self-update-v1" 2>/dev/null || true)" != \
-        "waku-self-update-v1" ]; then
-        echo "Archive is missing its managed-install marker." >&2
-        exit 1
-    fi
     # Replace rather than merge: a file dropped from a later layout must not
-    # survive the upgrade.
+    # survive the replacement.
     rm -rf "$app_dir"
     mv "$staging" "$app_dir"
     ln -sf "$app_dir/bin/waku" "$bin_link"
@@ -149,10 +97,7 @@ main() {
         fi
     fi
 
-    # Waku is a desktop app and takes no arguments, so the launcher entry is
-    # the way in. The PATH link is a convenience for starting it from a
-    # terminal to watch its output.
-    echo "Waku is installed."
+    echo "Piwaku is installed."
     if [ -f "$desktop_file" ]; then
         echo "Open it from your applications menu."
     fi
@@ -165,11 +110,11 @@ main() {
 
 uninstall() {
     if [ ! -d "$app_dir" ] && [ ! -L "$bin_link" ]; then
-        echo "Waku is not installed at $app_dir." >&2
+        echo "Piwaku is not installed at $app_dir." >&2
         exit 1
     fi
-    # Only reclaim the symlink and desktop entry this script created; a
-    # distro package's copies of both belong to the package manager.
+    # Only reclaim the symlink and desktop entry this script created; a distro
+    # package's copies of both belong to the package manager.
     if [ "$(readlink "$bin_link" 2>/dev/null || true)" = "$app_dir/bin/waku" ]; then
         rm -f "$bin_link"
     fi
@@ -177,7 +122,7 @@ uninstall() {
         rm -f "$desktop_file"
     fi
     rm -rf "$app_dir"
-    echo "Waku is uninstalled. Projects and settings remain in ~/.waku."
+    echo "Piwaku is uninstalled. Projects and settings remain in ~/.waku."
 }
 
 main "$@"

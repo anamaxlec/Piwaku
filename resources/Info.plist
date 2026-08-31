@@ -24,13 +24,6 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
-    <!-- Sparkle auto-update configuration for the Piwaku fork. The GitHub
-         release appcast is enabled once a matching Sparkle signing key and
-         release feed have been configured. -->
-    <key>SUFeedURL</key>
-    <string>https://github.com/anamaxlec/Piwaku/releases/latest/download/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>gv9GLMPjH5yMQkZMFXnoNfHOyL8/7KGzl/jzAqlzZZY=</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>

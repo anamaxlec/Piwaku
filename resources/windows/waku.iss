@@ -1,8 +1,7 @@
 ; Waku's Windows installer.
 ;
-; Per-user by design: %LOCALAPPDATA%\Programs needs no elevation, which is
-; what lets the in-app updater re-run this silently without a UAC prompt.
-; See RELEASING.md and docs/windows.md.
+; Per-user by design: %LOCALAPPDATA%\Programs needs no elevation.
+; See docs/windows.md for the installer layout.
 ;
 ; Built by scripts/bundle-windows.ts, which supplies:
 ;   /DAppVersion=<version>  /DArch=<x86_64|aarch64>
@@ -31,16 +30,13 @@
 #endif
 
 [Setup]
-; Never change AppId: it is how Windows and every later installer recognize
-; an existing install, and how the updater replaces rather than duplicates it.
+; Never change AppId: it is how Windows and later installers recognize an
+; existing install.
 AppId={{8B6C6E4A-3E0F-4F0B-9C5F-2E0E9C4B7A11}
 AppName=Waku
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
 AppPublisher=Waku
-AppPublisherURL=https://waku.sh
-AppSupportURL=https://github.com/egoist/waku/issues
-AppUpdatesURL=https://github.com/egoist/waku/releases
 DefaultDirName={autopf}\Waku
 DefaultGroupName=Waku
 UninstallDisplayName=Waku
@@ -57,18 +53,16 @@ ArchitecturesInstallIn64BitMode={#Architectures}
 ; What docs/windows.md promises. Enforcing it here beats installing onto a
 ; system that cannot run the result.
 MinVersion=10.0.17763
-; Two installers must not race — the updater can be triggered again while an
-; update is already applying.
+; Two installers must not race while an install is already applying.
 SetupMutex=WakuSetup
 ; No elevation, so an update never has to ask for it either.
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
-; The updater passes /DIR, and a manual reinstall should land where the
-; previous one did rather than asking again.
+; A reinstall should land where the previous one did rather than asking again.
 UsePreviousAppDir=yes
-; Waku persists continuously to SQLite, so closing it is safe; a silent
-; update cannot stop to ask, and a locked waku.exe would fail the install.
+; Waku persists continuously to SQLite, so closing it is safe and a locked
+; waku.exe does not make the installer duplicate the install.
 CloseApplications=force
 RestartApplications=no
 
@@ -88,5 +82,4 @@ Name: "{userdesktop}\Waku"; Filename: "{app}\waku.exe"; Tasks: desktopicon
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Run]
-; No skipifsilent: this is also how the updater's silent run brings Waku back.
 Filename: "{app}\waku.exe"; Description: "{cm:LaunchProgram,Waku}"; Flags: nowait postinstall

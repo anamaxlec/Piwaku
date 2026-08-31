@@ -1,10 +1,9 @@
-# Changelog
+# Piwaku Changelog
 
-All notable changes to Waku. This file is the **source of truth for the release
-notes shown in the in-app updater**: [`scripts/release.ts`](scripts/release.ts)
-extracts the section whose heading matches the version being released
-(`MARKETING_VERSION`) and publishes it next to the update, so Sparkle shows it in
-the update prompt.
+All notable changes to Piwaku. This file is the source of truth for the release
+notes attached to GitHub Releases: [`scripts/release.ts`](scripts/release.ts)
+extracts the section whose heading matches the version in `Cargo.toml` and
+writes it next to the macOS installers.
 
 Format follows [Keep a Changelog](https://keepachangelog.com). Add a new
 `## [<version>]` section at the top for each release, matching the version you
@@ -16,10 +15,15 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## 0.1.17
+
+- Remove the in-app update system and its Sparkle/appcast dependencies
+- Stop syncing release assets to Cloudflare R2; macOS installers are published through GitHub Releases
+- Refresh Piwaku package metadata for the Pi-first macOS app
+
 ## 0.1.16
 
 - Import and continue conversations started in agent CLIs with `/resume` or the command palette across every provider, in both Waku and Waku Web
-- Linux: add signed in-app updates with clean relaunch and automatic rollback
 - Copy Waku task IDs and agent CLI thread IDs from task info or the command palette
 - Keep each response's actions and changed-file summary after its final tool activity
 - Keep the selected task visible when navigating the sidebar

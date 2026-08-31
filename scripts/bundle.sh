@@ -128,29 +128,6 @@ if [ ! -d "$cached_helper_bundle" ]; then
   mv "$helper_cache_staging" "$helper_cache_entry"
 fi
 
-# Sparkle powers in-app updates. The framework is embedded in the bundle and
-# the same distribution's bin/ tools (generate_appcast, sign_update) sign
-# releases, so both come from one pinned archive cached outside target/ where
-# `cargo clean` cannot evict it. Bump the version and checksum together.
-sparkle_version="2.9.4"
-sparkle_sha256="ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9"
-sparkle_cache_root=".waku-cache/sparkle"
-sparkle_cache_entry="$sparkle_cache_root/$sparkle_version"
-sparkle_framework_source="$sparkle_cache_entry/Sparkle.framework"
-
-if [ ! -d "$sparkle_framework_source" ]; then
-  sparkle_staging="$sparkle_cache_root/.staging-$sparkle_version-$$"
-  rm -rf "$sparkle_staging"
-  mkdir -p "$sparkle_staging"
-  sparkle_archive="$sparkle_staging/Sparkle-$sparkle_version.tar.xz"
-  curl -fsSL --retry 3 -o "$sparkle_archive" \
-    "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-$sparkle_version.tar.xz"
-  echo "$sparkle_sha256  $sparkle_archive" | shasum -a 256 -c - >/dev/null
-  tar -xJf "$sparkle_archive" -C "$sparkle_staging" ./Sparkle.framework ./bin
-  rm "$sparkle_archive"
-  mv "$sparkle_staging" "$sparkle_cache_entry"
-fi
-
 rm -rf "$bundle"
 mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/waku-computer-use" "$contents/Helpers"
 cp "$cargo_target_dir/$profile/waku" "$contents/MacOS/$app_name"
@@ -164,17 +141,6 @@ cp resources/Info.plist "$contents/Info.plist"
 cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
 cp resources/computer-use/pi-extension.ts "$contents/Resources/computer-use/pi-extension.ts"
 cp resources/computer-use/SKILL.md "$contents/Resources/skills/waku-computer-use/SKILL.md"
-frameworks_directory="$contents/Frameworks"
-sparkle_framework="$frameworks_directory/Sparkle.framework"
-mkdir -p "$frameworks_directory"
-cp -R "$sparkle_framework_source" "$sparkle_framework"
-# Piwaku is not sandboxed, so Sparkle's XPC services never run; drop them along
-# with the header and module folders so the shipped framework carries no dev
-# artifacts and no unsigned nested code.
-for sparkle_extra in XPCServices Headers PrivateHeaders Modules; do
-  rm -rf "$sparkle_framework/$sparkle_extra" \
-    "$sparkle_framework/Versions/B/$sparkle_extra"
-done
 plutil -replace CFBundleDisplayName -string "$app_name" "$contents/Info.plist"
 plutil -replace CFBundleExecutable -string "$app_name" "$contents/Info.plist"
 plutil -replace CFBundleIdentifier -string "$bundle_identifier" "$contents/Info.plist"
@@ -183,13 +149,7 @@ cp -R "$cached_helper_bundle" "$helper_bundle"
 # Finder info and resource forks on copied resources make codesign reject the
 # bundle as "detritus"; strip extended attributes before signing.
 xattr -cr "$bundle"
-# Sparkle's nested executables sign first, then the framework, then the app.
-# The app's hardened runtime enforces library validation, so the framework must
-# carry the same identity as the app or dlopen rejects it at launch.
 if [ "$codesign_identity" = "-" ]; then
-  codesign --force --sign - "$sparkle_framework/Versions/B/Autoupdate"
-  codesign --force --sign - "$sparkle_framework/Versions/B/Updater.app"
-  codesign --force --sign - "$sparkle_framework"
   codesign --force --identifier "$bundle_identifier.js-repl" --sign - "$repl_executable"
   if [ "$profile" = "release" ]; then
     codesign --force --identifier "$bundle_identifier.daemon" --sign - "$daemon_executable"
@@ -205,16 +165,10 @@ if [ "$codesign_identity" = "-" ]; then
     codesign --force --sign - "$bundle"
   fi
 elif [ "$profile" = "release" ]; then
-  codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework/Versions/B/Autoupdate"
-  codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework/Versions/B/Updater.app"
-  codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework"
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.daemon" --sign "$codesign_identity" "$daemon_executable"
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$bundle"
 else
-  codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Autoupdate"
-  codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Updater.app"
-  codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework"
   codesign --force --options runtime --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
   codesign --force --options runtime --sign "$codesign_identity" "$bundle"
 fi

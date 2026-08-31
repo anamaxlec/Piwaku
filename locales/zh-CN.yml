@@ -1,7 +1,6 @@
 _version: 1
 
 menu.about: 关于 %{app}
-menu.check_for_updates: 检查更新…
 menu.settings: 设置…
 menu.quit: 退出 %{app}
 menu.file: 文件
@@ -27,10 +26,6 @@ menu.close_window: 关闭窗口
 window.minimize: 最小化
 window.maximize: 最大化
 window.restore: 还原
-updater.update: 更新
-updater.updating: 正在更新…
-updater.up_to_date: Waku 已是最新版本
-updater.failed: "更新失败：%{error}"
 command_palette.placeholder: 搜索任务或运行命令…
 command_palette.resume_placeholder: 搜索终端会话…
 command_palette.resume_provider_placeholder: 选择服务商…
@@ -257,8 +252,6 @@ common.creating: 正在创建…
 settings.local_by_default: 默认存储在本地
 settings.local_by_default_description: 项目、对话和设置均存储在这台电脑上
 settings.local_by_default_web_description: 项目、对话和附件保留在所连接的守护进程主机上。Waku Web 的偏好设置保留在此浏览器中。
-settings.automatic_updates: 自动更新
-settings.automatic_updates_description: 在后台检查新版本，并在发现更新时提示安装
 settings.share_anonymous_usage_data: 分享匿名使用数据
 settings.share_anonymous_usage_data_description: 分享功能使用情况和可靠性数据，帮助改进 Waku。不会包含提示词、回复、项目名称、文件路径等个人信息
 providers.coding_agents: 编程智能体

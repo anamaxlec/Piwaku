@@ -62,9 +62,9 @@ The archive is written under `target/release` with an install-prefix layout
 not bundle system graphics libraries; distribution packages should declare
 those runtime dependencies normally.
 
-`website/public/install.sh` (served at `https://waku.sh/install.sh`) is what
-users run to install that archive. Point it at a local build to exercise it
-without publishing:
+The Linux installer script is kept for source builds, but Piwaku's current
+public release workflow publishes macOS packages through GitHub Releases.
+Point the script at a local build to exercise it without publishing:
 
 ```sh
 WAKU_BUNDLE_PATH=target/release/waku-<version>-<target>.tar.gz \
@@ -89,8 +89,8 @@ or newer must be installed (`choco install innosetup`) — the architecture
 gate uses identifiers added in 6.3. Set `WINDOWS_CERTIFICATE`
 (base64 `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` to Authenticode-sign them;
 without those the script packages unsigned binaries and says so.
-[docs/windows.md](docs/windows.md) documents installing for users, and
-[RELEASING.md](RELEASING.md) the signed update feed.
+[docs/windows.md](docs/windows.md) documents the Windows installer layout, and
+[RELEASING.md](RELEASING.md) documents the macOS GitHub Release workflow.
 
 ## Making changes
 

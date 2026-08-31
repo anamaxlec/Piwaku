@@ -1,8 +1,8 @@
 [package]
 name = "waku"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
-description = "A fast, native control plane for local coding agents"
+description = "Piwaku: a Pi-first native desktop client for coding agents on macOS"
 license = "GPL-3.0-only"
 
 [workspace]
@@ -142,13 +142,8 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = ["st
 raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Linux verifies the release archive with the same key as Sparkle and unpacks
-# it into a sibling staging prefix before the handoff helper swaps it in.
-ed25519-dalek = "2"
-flate2 = "1"
 # Matches the version GPUI exposes through `WindowOptions::icon`.
 image = { version = "0.25", default-features = false, features = ["png"] }
-tar = "0.4"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 embed-resource = "3.0"
@@ -180,10 +175,6 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
-# Verifies the EdDSA signatures `generate_appcast` writes, so the Windows
-# updater trusts the same key Sparkle does on macOS.
-ed25519-dalek = "2"
-
 [profile.release]
 lto = "thin"
 codegen-units = 1

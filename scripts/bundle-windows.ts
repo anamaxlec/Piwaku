@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 //
 // Build and package the Windows release: a portable zip and the Inno Setup
-// installer the in-app updater re-runs silently. Mirrors bundle-linux.sh for
-// the archive half and resources/windows/waku.iss for the installer half.
+// installer. Mirrors bundle-linux.sh for the archive half and
+// resources/windows/waku.iss for the installer half.
 //
 // Usage:
 //   bun scripts/bundle-windows.ts
@@ -20,8 +20,8 @@ import { join, resolve } from "node:path";
 const packageName = "waku";
 const projectRoot = resolve(import.meta.dir, "..");
 
-/** The updater picks its feed by Rust arch name, so the installer carries
- *  that rather than the full triple. */
+/** The installer carries a short architecture name rather than the full
+ *  target triple. */
 const architectureForTarget: Record<string, string> = {
   "x86_64-pc-windows-msvc": "x86_64",
   "aarch64-pc-windows-msvc": "aarch64",
@@ -163,8 +163,7 @@ try {
   await $`tar -a -c -f ${archive} -C ${staging} ${packageDirectoryName}`;
   console.log(`Created ${archive}`);
 
-  // The installer is what the in-app updater downloads and re-runs, so it
-  // ships from the same signed staging directory as the zip.
+  // The installer ships from the same signed staging directory as the zip.
   await rm(installer, { force: true });
   await $`${findInnoSetupCompiler()} ${`/DAppVersion=${version}`} ${`/DArch=${architecture}`} ${`/DStageDir=${packageDirectory}`} ${`/DOutputDir=${releaseDirectory}`} ${join(projectRoot, "resources", "windows", "waku.iss")}`;
   if (!existsSync(installer)) {

@@ -1,16 +1,12 @@
-# Waku on Windows
+# Piwaku on Windows
 
 ## Install
 
-Download `Waku-<version>-x86_64-Setup.exe` (or the `aarch64` installer on an
-Arm device) from [releases.waku.sh](https://releases.waku.sh) or the
-[GitHub release](https://github.com/egoist/waku/releases) and run it. It
+Piwaku's current public release workflow publishes macOS installers only.
+Windows builds can still be packaged locally with the repository's build
+script. Run the resulting installer when one is available. It
 installs per-user into `%LOCALAPPDATA%\Programs\Waku`, so it never asks for
-administrator rights — which is also what lets Waku update itself later
-without a UAC prompt.
-
-`https://releases.waku.sh/latest-windows.txt` names the current version if you
-want to script the download.
+administrator rights.
 
 ### Portable
 
@@ -21,9 +17,8 @@ anywhere and run `waku.exe`.
 own directory, so moving `waku.exe` out on its own leaves it unable to start
 the daemon. A shortcut is fine.
 
-A portable copy still updates itself: the updater passes the running
-directory to the installer, so it replaces that copy in place rather than
-creating a second install.
+A portable copy can be replaced manually by unpacking a newer local build over
+the existing directory after closing the app.
 
 Waku expects:
 
@@ -42,22 +37,8 @@ release was not code-signed. Choose **More info → Run anyway**.
 
 ## Updating
 
-Waku updates itself. It checks once per launch, and an available update
-appears in the sidebar footer; clicking it downloads the installer, verifies
-its signature, and runs it. Waku closes, is replaced in place, and reopens.
-Turn the check off in **Settings → General → Automatic updates** — **Check for
-Updates…** in the app menu still works either way.
-
-Updates are the same signed feed macOS uses, with one appcast per
-architecture:
-
-- `https://releases.waku.sh/appcast-windows-x86_64.xml`
-- `https://releases.waku.sh/appcast-windows-aarch64.xml`
-
-Every installer carries an EdDSA signature, and Waku refuses one that does not
-verify against the public key built into it — so a compromised mirror or a
-tampered download cannot install anything. The preference itself lives in
-`%LOCALAPPDATA%\Waku\updater.json`.
+Piwaku has no in-app updater. Close the app and install a newer local build
+manually, or use the package manager that installed it.
 
 ## Where Waku keeps its data
 
@@ -133,8 +114,5 @@ shim on `PATH`. If the shell finds it but Waku does not, set the binary path in
 **Git-backed features do nothing.** Waku shells out to `git`. Install Git for
 Windows and make sure `git --version` works in a new terminal.
 
-**The update never arrives.** Waku reaches the feed with the `curl.exe` in
-System32; a proxy or filter that blocks `releases.waku.sh` blocks updates too.
-**Check for Updates…** reports the reason, where the once-per-launch check
-stays quiet. Downloading the installer by hand and running it is always
-equivalent.
+Piwaku has no background update feed. Install a newer local build manually
+after closing the app.
