@@ -103,11 +103,26 @@ Piwaku 仍然保留来自 Waku 的核心工作流：
 
 ### 安装
 
-目前 Piwaku 的自用构建主要面向 **macOS**。
+Piwaku 当前提供 **macOS** 安装包。推荐直接从 [GitHub Releases](https://github.com/anamaxlec/Piwaku/releases/latest) 下载最新的 `.dmg`，安装后将 `Piwaku.app` 拖入 `/Applications`。
 
-暂时还没有公开的二进制 Release，需要从源码构建。
+#### macOS 首次启动 / ad-hoc 签名说明
 
-依赖：
+目前发布的 macOS 构建使用 **ad-hoc 签名**，没有 Apple Developer ID 签名和 notarization。因此首次启动时，macOS Gatekeeper 可能会提示无法验证开发者或阻止应用打开。
+
+确认安装包来自本仓库后，可以使用以下任一方式放行：
+
+1. 先尝试打开一次 Piwaku，然后进入 **系统设置 → 隐私与安全性**，在安全提示处点击 **仍要打开 / Open Anyway**，再确认启动。
+2. 或在终端中只移除 Piwaku 的 quarantine 标记：
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Piwaku.app
+```
+
+执行后重新打开 Piwaku 即可。这个命令只应对你确认来自本仓库 Release 的 `Piwaku.app` 使用。
+
+#### 从源码运行
+
+需要开发或自行构建时：
 
 - Rust 1.96 或更高版本
 - Bun
@@ -116,12 +131,9 @@ Piwaku 仍然保留来自 Waku 的核心工作流：
 ```sh
 git clone https://github.com/anamaxlec/Piwaku.git
 cd Piwaku
-git switch piwaku/dialog-bridge
 bun install
 bun run dev
 ```
-
-当前 Piwaku 的主要改动仍位于 `piwaku/dialog-bridge` 分支。
 
 ### 支持的 Agent
 
@@ -261,11 +273,26 @@ Piwaku still keeps the core workflow inherited from Waku:
 
 ### Install
 
-Piwaku currently targets **macOS** for my own builds.
+Piwaku currently provides a **macOS** build. Download the latest `.dmg` from [GitHub Releases](https://github.com/anamaxlec/Piwaku/releases/latest), install it, and move `Piwaku.app` to `/Applications`.
 
-There are no public binary releases yet. Build from source for now.
+#### First launch on macOS / ad-hoc signing
 
-Requirements:
+Current macOS releases are **ad-hoc signed** and are not signed with an Apple Developer ID or notarized. Gatekeeper may therefore report that the developer cannot be verified or prevent the app from opening on first launch.
+
+After confirming that the app came from this repository, use either of these methods:
+
+1. Try opening Piwaku once, then go to **System Settings → Privacy & Security**, click **Open Anyway** for Piwaku, and confirm the launch.
+2. Or remove the quarantine attribute for Piwaku only:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Piwaku.app
+```
+
+Then open Piwaku again. Only run this command for a `Piwaku.app` that you trust and downloaded from this repository's Releases.
+
+#### Build from source
+
+For development or local builds:
 
 - Rust 1.96 or newer
 - Bun
@@ -274,12 +301,9 @@ Requirements:
 ```sh
 git clone https://github.com/anamaxlec/Piwaku.git
 cd Piwaku
-git switch piwaku/dialog-bridge
 bun install
 bun run dev
 ```
-
-The active Piwaku changes currently live on the `piwaku/dialog-bridge` branch while the fork is being developed.
 
 ### Supported agents
 
