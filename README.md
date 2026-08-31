@@ -40,7 +40,7 @@ structured protocol and session continuity.
 The native desktop is an RPC client of the standalone `waku-daemon` process.
 Provider sessions run in [`waku-core`](crates/waku-core), behind the
 authenticated, versioned WebSocket contract in
-[`waku-protocol`](crates/waku-protocol). Waku Desktop depends on
+[`waku-protocol`](crates/waku-protocol). Piwaku Desktop depends on
 [`waku-client`](crates/waku-client), not on the daemon implementation. The
 daemon owns task SQLite data, uploaded attachments, provider-native session
 forks, and all workspace filesystem and Git operations; paths returned by it
