@@ -215,7 +215,11 @@ fn active_chain(session: &ParsedSession, provider: ProviderKind) -> Vec<&NativeE
         return Vec::new();
     };
     let mut chain = Vec::new();
+    let mut visited = HashSet::new();
     loop {
+        if !visited.insert(current.id.as_str()) {
+            break;
+        }
         chain.push(current);
         let Some(parent) = current.parent_id.as_deref() else {
             break;
@@ -512,6 +516,75 @@ mod tests {
                 .all(|message| message.content != "abandoned")
         );
         let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn active_chain_stops_on_a_self_cycle() {
+        let session = ParsedSession {
+            session_id: "self-cycle".into(),
+            cwd: std::env::temp_dir(),
+            title: None,
+            created_at: 0,
+            updated_at: 0,
+            entries: vec![NativeEntry {
+                id: "entry".into(),
+                parent_id: Some("entry".into()),
+                kind: "message".into(),
+                role: Some("user".into()),
+                text: Some("prompt".into()),
+                stop_reason: None,
+                timestamp: 0,
+            }],
+        };
+
+        let chain = active_chain(&session, ProviderKind::Pi);
+        assert_eq!(
+            chain
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["entry"]
+        );
+    }
+
+    #[test]
+    fn active_chain_stops_on_a_two_node_cycle() {
+        let session = ParsedSession {
+            session_id: "two-node-cycle".into(),
+            cwd: std::env::temp_dir(),
+            title: None,
+            created_at: 0,
+            updated_at: 0,
+            entries: vec![
+                NativeEntry {
+                    id: "x".into(),
+                    parent_id: Some("y".into()),
+                    kind: "message".into(),
+                    role: Some("user".into()),
+                    text: Some("first".into()),
+                    stop_reason: None,
+                    timestamp: 0,
+                },
+                NativeEntry {
+                    id: "y".into(),
+                    parent_id: Some("x".into()),
+                    kind: "message".into(),
+                    role: Some("assistant".into()),
+                    text: Some("second".into()),
+                    stop_reason: Some("stop".into()),
+                    timestamp: 0,
+                },
+            ],
+        };
+
+        let chain = active_chain(&session, ProviderKind::Pi);
+        assert_eq!(
+            chain
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["x", "y"]
+        );
     }
 
     #[test]

@@ -8,8 +8,10 @@ use uuid::Uuid;
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::model::{
-    AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
-    ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
+    AgentSession, GoalOperation, PiApiKeyUpdate, PiExtensionInfo, PiExtensionScope,
+    PiModelSnapshot, PiProviderSettingsSnapshot, PiSettingsSnapshot, Project, ProviderKind,
+    ProviderProbe, ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary,
+    UserInputAnswer,
 };
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
@@ -113,6 +115,13 @@ pub enum Command {
     Goal {
         operation: GoalOperation,
     },
+    /// Decline a structured-question request without answering it. Providers
+    /// treat this as "the user dismissed the dialog": Pi extensions resolve
+    /// their cancelled promise, while an unanswered request would just stall
+    /// the turn.
+    CancelUserInput {
+        request_id: String,
+    },
     RunComputerTool {
         request: WireComputerToolRequest,
     },
@@ -157,6 +166,78 @@ pub enum Command {
     SetSkillsEnabled {
         dirs: Vec<PathBuf>,
         enabled: bool,
+    },
+    /// PIWAKU: inventory the provider host's installed pi packages across
+    /// global and the given project scopes. Daemon-side because every pi
+    /// path is the daemon host's, never the client's.
+    LoadPiExtensions {
+        projects: Vec<(String, PathBuf)>,
+    },
+    /// PIWAKU: enable or disable one pi package. Disabling removes the entry
+    /// from pi's own settings `packages` array (its only source of truth)
+    /// and records it in daemon settings so the manager can offer it back.
+    SetPiExtensionEnabled {
+        source: String,
+        scope: PiExtensionScope,
+        project_root: Option<PathBuf>,
+        enabled: bool,
+    },
+    /// Check the npm registry for one package's current version. The result
+    /// is deliberately ephemeral; clients decide whether it is newer than
+    /// their installed version.
+    CheckPiExtensionUpdate {
+        source: String,
+    },
+    /// Run Pi's own package updater for one inventory identity.
+    UpdatePiExtension {
+        source: String,
+        scope: PiExtensionScope,
+        project_root: Option<PathBuf>,
+        /// Client's current project inventory. The daemon cross-checks these
+        /// paths against its own registered projects before executing.
+        projects: Vec<(String, PathBuf)>,
+    },
+    /// Run Pi's own package remover for one inventory identity.
+    RemovePiExtension {
+        source: String,
+        scope: PiExtensionScope,
+        project_root: Option<PathBuf>,
+        /// Client's current project inventory. The daemon cross-checks these
+        /// paths against its own registered projects before executing.
+        projects: Vec<(String, PathBuf)>,
+    },
+    /// Read daemon-host Pi config and extension setting values without
+    /// exposing arbitrary settings JSON to the client.
+    LoadPiSettings {
+        projects: Vec<(String, PathBuf)>,
+    },
+    /// Update the one Pi setting Waku owns in v1. The daemon rejects all
+    /// other setting writes because this command has no generic key path.
+    SetPiQuietStartup {
+        enabled: bool,
+    },
+    /// Read the daemon-host Pi models.json without exposing arbitrary values
+    /// or credentials.
+    LoadPiProviderSettings,
+    /// Add or edit one user-configured provider. The id is the stable key and
+    /// is therefore immutable; unsupported API kinds are rejected by daemon.
+    UpsertPiProvider {
+        id: String,
+        name: Option<String>,
+        base_url: Option<String>,
+        api: String,
+        api_key: PiApiKeyUpdate,
+    },
+    DeletePiProvider {
+        id: String,
+    },
+    UpsertPiModel {
+        provider_id: String,
+        model: PiModelSnapshot,
+    },
+    DeletePiModel {
+        provider_id: String,
+        model_id: String,
     },
     TrashSkills {
         dirs: Vec<PathBuf>,
@@ -401,6 +482,21 @@ pub enum ResponsePayload {
     SkillsCatalog {
         catalog: SkillsCatalog,
     },
+    PiExtensions {
+        extensions: Vec<PiExtensionInfo>,
+    },
+    PiSettings {
+        snapshot: PiSettingsSnapshot,
+    },
+    PiProviderSettings {
+        snapshot: PiProviderSettingsSnapshot,
+    },
+    /// The latest npm version for a user-requested check. `None` means the
+    /// registry lookup was unavailable or did not return a usable value.
+    PiExtensionUpdateCheck {
+        source: String,
+        latest_version: Option<String>,
+    },
     TaskState {
         projects: Vec<Project>,
         sessions: Vec<AgentSession>,
@@ -491,6 +587,7 @@ mod base64_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{PiSettingsScopeSnapshot, PiSettingsSnapshot};
 
     #[test]
     fn binary_payloads_use_base64_json_strings() {
@@ -612,5 +709,80 @@ mod tests {
             project_id.to_string()
         );
         assert_eq!(json["changes"][0]["draft"]["text"], "unfinished");
+    }
+
+    #[test]
+    fn pi_settings_command_and_response_use_stable_wire_keys() {
+        let project_root = PathBuf::from("/workspace/project");
+        let command = Command::LoadPiSettings {
+            projects: vec![("Project".to_owned(), project_root.clone())],
+        };
+        let json = serde_json::to_value(command).unwrap();
+        assert_eq!(json["type"], "loadPiSettings");
+        assert_eq!(json["projects"][0][0], "Project");
+        assert_eq!(
+            json["projects"][0][1],
+            serde_json::to_value(&project_root).unwrap()
+        );
+
+        let response = ResponsePayload::PiSettings {
+            snapshot: PiSettingsSnapshot {
+                global: PiSettingsScopeSnapshot {
+                    config_path: PathBuf::from("/home/user/.pi/agent/settings.json"),
+                    extensions_path: PathBuf::from("/home/user/.pi/agent/settings-extensions.json"),
+                    default_provider: Some("pi".to_owned()),
+                    default_model: None,
+                    default_thinking_level: None,
+                    quiet_startup: Some(true),
+                    extension_settings: Vec::new(),
+                    error: None,
+                },
+                projects: Vec::new(),
+            },
+        };
+        let json = serde_json::to_value(response).unwrap();
+        assert_eq!(json["type"], "piSettings");
+        assert_eq!(json["snapshot"]["global"]["defaultProvider"], "pi");
+        assert_eq!(json["snapshot"]["global"]["quietStartup"], true);
+    }
+
+    #[test]
+    fn pi_extension_lifecycle_commands_use_explicit_wire_shapes() {
+        let check = serde_json::to_value(Command::CheckPiExtensionUpdate {
+            source: "npm:pi-demo".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(check["type"], "checkPiExtensionUpdate");
+        assert_eq!(check["source"], "npm:pi-demo");
+
+        let update = serde_json::to_value(Command::UpdatePiExtension {
+            source: "npm:pi-demo".to_owned(),
+            scope: crate::model::PiExtensionScope::Project,
+            project_root: Some(PathBuf::from("/workspace/project")),
+            projects: vec![("Project".to_owned(), PathBuf::from("/workspace/project"))],
+        })
+        .unwrap();
+        assert_eq!(update["type"], "updatePiExtension");
+        assert_eq!(update["scope"], "project");
+        assert_eq!(update["projectRoot"], "/workspace/project");
+        assert_eq!(update["projects"][0][1], "/workspace/project");
+
+        let remove = serde_json::to_value(Command::RemovePiExtension {
+            source: "npm:pi-demo".to_owned(),
+            scope: crate::model::PiExtensionScope::User,
+            project_root: None,
+            projects: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(remove["type"], "removePiExtension");
+        assert_eq!(remove["projectRoot"], Value::Null);
+
+        let response = serde_json::to_value(ResponsePayload::PiExtensionUpdateCheck {
+            source: "npm:pi-demo".to_owned(),
+            latest_version: Some("1.2.4".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(response["type"], "piExtensionUpdateCheck");
+        assert_eq!(response["latestVersion"], "1.2.4");
     }
 }

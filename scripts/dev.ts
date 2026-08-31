@@ -6,11 +6,11 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
-const appName = "Waku Debug";
+const appName = "Piwaku Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
-  ? join(targetDir, "debug/Waku Debug.app")
+  ? join(targetDir, "debug/Piwaku Debug.app")
   : join(targetDir, `debug/waku${executableSuffix}`);
 const daemonPath = join(
   targetDir,
@@ -163,14 +163,14 @@ async function prepareHyprlandLaunch(): Promise<void> {
     if _G[workspace_key] == nil then
       _G[workspace_key] = hl.window_rule({
         name = "waku-dev-workspace",
-        match = { initial_class = "sh[.]waku[.]dev" },
+        match = { initial_class = "sh[.]piwaku[.]dev" },
         workspace = ${luaString(`${hyprlandWorkspace.selector} silent`)},
       })
     end
     if _G[background_key] == nil then
       _G[background_key] = hl.window_rule({
         name = "waku-dev-background",
-        match = { initial_class = "sh[.]waku[.]dev" },
+        match = { initial_class = "sh[.]piwaku[.]dev" },
         no_initial_focus = true,
         suppress_event = "activate activatefocus",
       })
@@ -182,7 +182,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
     if _G[subscription_key] == nil then
       local anchor_selector = ${luaString(anchorSelector)}
       _G[subscription_key] = hl.on("window.open", function(window)
-        if not _G[armed_key] or window.initial_class ~= "sh.waku.dev" then
+        if not _G[armed_key] or window.initial_class ~= "sh.piwaku.dev" then
           return
         end
         _G[armed_key] = false
@@ -206,7 +206,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
           return
         end
 
-        -- Swapping with each preceding singleton column rotates Waku into the
+        -- Swapping with each preceding singleton column rotates Piwaku into the
         -- desired slot while preserving the order of all intervening columns.
         -- A stacked or custom-width column cannot be rotated through this API
         -- without changing its membership or sizing, so leave it untouched.
@@ -257,7 +257,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
       const detail =
         result.stderr.toString().trim() || result.stdout.toString().trim();
       console.warn(
-        `[waku-dev] Could not pin Waku to its Hyprland workspace${detail ? `: ${detail}` : "."}`,
+      `[waku-dev] Could not pin Piwaku to its Hyprland workspace${detail ? `: ${detail}` : "."}`,
       );
       hyprlandWarningShown = true;
     }
@@ -266,7 +266,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
 
   if (!hyprlandRulesInstalled) {
     console.log(
-      `[waku-dev] Keeping Waku beside the watcher on Hyprland workspace ${hyprlandWorkspace.name}.`,
+      `[waku-dev] Keeping Piwaku beside the watcher on Hyprland workspace ${hyprlandWorkspace.name}.`,
     );
   }
   hyprlandRulesInstalled = true;
@@ -454,7 +454,7 @@ async function drainBuildQueue(): Promise<void> {
       if (target === "daemon") {
         if (daemonChangeRevision === buildDaemonRevision) {
           console.log(
-            "[waku-dev] Daemon rebuilt; Waku will swap the process without relaunching.",
+            "[waku-dev] Daemon rebuilt; Piwaku will swap the process without relaunching.",
           );
         }
         continue;
@@ -515,5 +515,5 @@ if (appChangeRevision === initialAppRevision) {
 }
 
 console.log(
-  "[waku-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Waku.",
+  "[waku-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Piwaku.",
 );

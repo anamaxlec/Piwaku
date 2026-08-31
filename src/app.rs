@@ -32,11 +32,12 @@ use crate::md;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
-    ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe,
-    ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
-    ReasoningBlock, RuntimeMode, SessionStatus, SessionWorkspace, TranscriptBlock, TurnStatus,
-    UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
+    ContextUsage, DriverEvent, FavoriteModel, InteractionMode, MagicContextStatus, Message,
+    MessageAttachment, MessageRole, PendingPermission, PiApiKeyUpdate, PiProviderSettingsSnapshot,
+    PiSettingsSnapshot, Project, ProviderKind, ProviderModel, ProviderProbe, ProviderResumeCursor,
+    ProviderSessionHistory, ProviderSessionSummary, QueuedMessage, ReasoningBlock, RuntimeMode,
+    SessionStatus, SessionWorkspace, TodoSnapshot, TodoTask, TodoTaskStatus, TranscriptBlock,
+    TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -130,6 +131,7 @@ const STREAM_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Zed keeps status toasts on screen for ten seconds, pausing the countdown
 /// while the pointer is over the toast so a long message remains readable.
 const DEFAULT_TOAST_DURATION: Duration = Duration::from_secs(5);
+const PI_INFO_STATUS_DURATION: Duration = Duration::from_secs(5);
 const MINIMUM_TOAST_RESUME_DURATION: Duration = Duration::from_millis(800);
 const TOAST_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 const TASK_NOTIFICATION_TAG_PREFIX: &str = "waku-task:";
@@ -216,6 +218,7 @@ enum SettingsPage {
     General,
     Providers,
     Skills,
+    Pi,
     Usage,
     Daemon,
     ComputerUse,
@@ -283,6 +286,26 @@ struct ToastState {
 enum ToastTone {
     Alert,
     Success,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PiNotificationPresentation {
+    Inline,
+    Alert,
+}
+
+fn pi_notification_presentation(level: &str) -> PiNotificationPresentation {
+    if matches!(level, "warning" | "error") {
+        PiNotificationPresentation::Alert
+    } else {
+        PiNotificationPresentation::Inline
+    }
+}
+
+struct InlinePiNotification {
+    session_id: Uuid,
+    message: String,
+    generation: u64,
 }
 
 fn paused_toast_duration(remaining: Duration, elapsed: Duration) -> Duration {
@@ -864,6 +887,11 @@ struct SessionRuntime {
     stream_remeasure_pending: bool,
     pending_permission: Option<PendingPermission>,
     pending_user_input: Option<PendingUserInput>,
+    /// PIWAKU: latest agent task-list snapshot for the native panel.
+    todo_state: Option<TodoSnapshot>,
+    /// Session-scoped Magic Context status; unlike transcript content this is
+    /// replaced in place by the provider's latest setStatus/custom entry.
+    magic_context_status: Option<MagicContextStatus>,
     pending_computer_approval: Option<PendingComputerApproval>,
     /// Back-to-front stack of window previews captured during the active turn.
     computer_use_previews: Vec<ComputerUsePreview>,
@@ -1340,6 +1368,9 @@ pub struct Waku {
     sidebar_rendered_width: f32,
     right_panel_rendered_width: f32,
     fps_counter_visible: bool,
+    /// PIWAKU: whether the native task panel sits collapsed above the
+    /// composer. App-level preference, not per-session state.
+    todo_panel_collapsed: bool,
     panel_resize_drag: Option<PanelResizeDrag>,
     right_panel_session_states: HashMap<Uuid, RightPanelSessionState>,
     right_panel_surfaces: Vec<RightPanelSurface>,
@@ -1408,6 +1439,48 @@ pub struct Waku {
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
+    /// PIWAKU: cached pi extension inventory for the Settings → Pi page.
+    pi_extensions: Option<Rc<Vec<crate::model::PiExtensionInfo>>>,
+    pi_extensions_pending: bool,
+    pi_extensions_generation: u64,
+    pi_extensions_inflight_generation: Option<u64>,
+    pi_extensions_mutation_pending: bool,
+    /// Latest versions returned by explicit user-requested npm checks. This
+    /// cache is intentionally runtime-only and keyed by full inventory
+    /// identity rather than source alone.
+    pi_extension_latest_versions: HashMap<String, Option<String>>,
+    pi_extension_update_pending: HashSet<String>,
+    pi_extension_action_pending: bool,
+    pi_extension_remove_arming: Option<String>,
+    /// When the cached inventory was loaded; drives the rescan TTL.
+    pi_extensions_scanned_at: Option<Instant>,
+    /// PIWAKU: daemon-host Pi General and Extension Settings snapshot.
+    pi_settings: Option<Rc<PiSettingsSnapshot>>,
+    pi_settings_pending: bool,
+    pi_settings_generation: u64,
+    /// PIWAKU: credential-blind Pi models.json snapshot and the small inline
+    /// provider/model forms used by Settings → Pi.
+    pi_provider_settings: Option<Rc<PiProviderSettingsSnapshot>>,
+    pi_provider_settings_pending: bool,
+    pi_provider_settings_generation: u64,
+    pi_provider_form_provider: Option<String>,
+    pi_model_form_model: Option<(String, String)>,
+    pi_provider_id_input: Entity<TextInput>,
+    pi_provider_name_input: Entity<TextInput>,
+    pi_provider_base_url_input: Entity<TextInput>,
+    pi_provider_api_input: Entity<TextInput>,
+    pi_provider_api_key_input: Entity<TextInput>,
+    pi_model_provider_input: Entity<TextInput>,
+    pi_model_id_input: Entity<TextInput>,
+    pi_model_name_input: Entity<TextInput>,
+    pi_model_api_input: Entity<TextInput>,
+    pi_model_reasoning_input: Entity<TextInput>,
+    pi_model_input_input: Entity<TextInput>,
+    pi_model_context_input: Entity<TextInput>,
+    pi_model_max_tokens_input: Entity<TextInput>,
+    pi_provider_key_action: PiApiKeyUpdate,
+    pi_provider_delete_arming: Option<String>,
+    pi_model_delete_arming: Option<(String, String)>,
     /// Bumped per scan; a result from a superseded scan is discarded.
     skills_scan_generation: u64,
     skills_scan_pending: bool,
@@ -1448,6 +1521,8 @@ pub struct Waku {
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
+    inline_pi_notification: Option<InlinePiNotification>,
+    inline_pi_notification_generation: u64,
     copied_control_feedback: HashMap<String, u64>,
     copied_control_generation: u64,
     copied_message_feedback: HashMap<Uuid, u64>,
@@ -1601,12 +1676,13 @@ mod background_work;
 mod branches;
 mod command_palette;
 mod commit_dialog;
-mod goal_dialog;
 mod components;
 mod composer;
 mod drafts;
 mod file_search;
+mod goal_dialog;
 mod image_preview;
+mod pi_settings_page;
 mod render;
 mod right_panel;
 mod runtime;
@@ -1616,6 +1692,7 @@ mod sidebar;
 mod skills_page;
 mod streaming;
 mod task_switcher;
+mod todo_panel;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
@@ -1629,8 +1706,8 @@ use background_work::{
 };
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
-pub use goal_dialog::init as init_goal_dialog_keys;
 use components::*;
+pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -1803,6 +1880,39 @@ impl Waku {
         self.show_toast_with_tone(message, ToastTone::Success);
     }
 
+    pub(super) fn show_inline_pi_notification(
+        &mut self,
+        session_id: Uuid,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.inline_pi_notification_generation =
+            self.inline_pi_notification_generation.wrapping_add(1);
+        let generation = self.inline_pi_notification_generation;
+        self.inline_pi_notification = Some(InlinePiNotification {
+            session_id,
+            message,
+            generation,
+        });
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(PI_INFO_STATUS_DURATION)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .inline_pi_notification
+                    .as_ref()
+                    .is_some_and(|notification| notification.generation == generation)
+                {
+                    this.inline_pi_notification = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     fn show_toast_with_tone(&mut self, message: impl Into<String>, tone: ToastTone) {
         self.toast_selection.selection.borrow_mut().clear();
         self.toast_selection.registry.borrow_mut().clear();
@@ -1964,10 +2074,8 @@ impl Waku {
         });
 
         let composer = cx.new(|cx| ComposerInput::new(window, cx).padding_x(px(14.0), cx));
-        let user_input_answer = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .placeholder(tr!("user_input.other_placeholder"))
-        });
+        let user_input_answer = cx
+            .new(|cx| TextInput::new(window, cx).placeholder(tr!("user_input.other_placeholder")));
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2020,14 +2128,76 @@ impl Waku {
                 .select_all_on_focus_click()
                 .placeholder(tr!("input.detected_automatically"))
         });
-        let usage_project_filter = cx.new(|cx| {
+        let pi_provider_id_input = cx.new(|cx| {
             TextInput::new(window, cx)
-                .placeholder(tr!("input.filter_projects"))
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.provider_id_placeholder"))
         });
-        let right_panel_diff_filter = cx.new(|cx| {
+        let pi_provider_name_input = cx.new(|cx| {
             TextInput::new(window, cx)
-                .placeholder(tr!("diff.filter_files"))
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.provider_name_placeholder"))
         });
+        let pi_provider_base_url_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.provider_base_url_placeholder"))
+        });
+        let pi_provider_api_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.provider_api_placeholder"))
+        });
+        let pi_provider_api_key_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.provider_api_key_placeholder"))
+                .obscured(true)
+        });
+        let pi_model_provider_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_provider_placeholder"))
+        });
+        let pi_model_id_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_id_placeholder"))
+        });
+        let pi_model_name_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_name_placeholder"))
+        });
+        let pi_model_api_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_api_placeholder"))
+        });
+        let pi_model_reasoning_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_reasoning_placeholder"))
+        });
+        let pi_model_input_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_input_placeholder"))
+        });
+        let pi_model_context_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_context_placeholder"))
+        });
+        let pi_model_max_tokens_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("pi_settings.model_max_tokens_placeholder"))
+        });
+        let usage_project_filter =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
+        let right_panel_diff_filter =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
         let sidebar_pane = WakuPane::new(Waku::sidebar_pane_content, cx);
         let transcript_pane = WakuPane::new(Waku::transcript_pane_content, cx);
@@ -2559,14 +2729,11 @@ impl Waku {
                 )
                 .detach();
             }
-            cx.subscribe(
-                &skills_search,
-                |_: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited) {
-                        cx.notify();
-                    }
-                },
-            )
+            cx.subscribe(&skills_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
             .detach();
             cx.subscribe(
                 &session_rename_input,
@@ -2872,6 +3039,7 @@ impl Waku {
                     0.0
                 },
                 fps_counter_visible: false,
+                todo_panel_collapsed: false,
                 panel_resize_drag: None,
                 right_panel_session_states: HashMap::new(),
                 right_panel_surfaces: Vec::new(),
@@ -2917,6 +3085,40 @@ impl Waku {
                 scene_overlay_enabled,
                 settings_page: None,
                 skills_catalog: None,
+                pi_extensions: None,
+                pi_extensions_pending: false,
+                pi_extensions_generation: 0,
+                pi_extensions_inflight_generation: None,
+                pi_extensions_mutation_pending: false,
+                pi_extension_latest_versions: HashMap::new(),
+                pi_extension_update_pending: HashSet::new(),
+                pi_extension_action_pending: false,
+                pi_extension_remove_arming: None,
+                pi_extensions_scanned_at: None,
+                pi_settings: None,
+                pi_settings_pending: false,
+                pi_settings_generation: 0,
+                pi_provider_settings: None,
+                pi_provider_settings_pending: false,
+                pi_provider_settings_generation: 0,
+                pi_provider_form_provider: None,
+                pi_model_form_model: None,
+                pi_provider_id_input,
+                pi_provider_name_input,
+                pi_provider_base_url_input,
+                pi_provider_api_input,
+                pi_provider_api_key_input,
+                pi_model_provider_input,
+                pi_model_id_input,
+                pi_model_name_input,
+                pi_model_api_input,
+                pi_model_reasoning_input,
+                pi_model_input_input,
+                pi_model_context_input,
+                pi_model_max_tokens_input,
+                pi_provider_key_action: PiApiKeyUpdate::Unchanged,
+                pi_provider_delete_arming: None,
+                pi_model_delete_arming: None,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,
                 skills_scanned_at: None,
@@ -2944,6 +3146,8 @@ impl Waku {
                     hovered: false,
                 }),
                 toast_generation: 0,
+                inline_pi_notification: None,
+                inline_pi_notification_generation: 0,
                 copied_control_feedback: HashMap::new(),
                 copied_control_generation: 0,
                 copied_message_feedback: HashMap::new(),

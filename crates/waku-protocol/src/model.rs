@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -873,7 +874,11 @@ pub struct ThreadGoal {
 /// come back asynchronously as [`DriverEvent::GoalUpdated`]; failures surface
 /// through [`DriverEvent::Error`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum GoalOperation {
     /// Re-read the provider's current goal without changing it.
     Refresh,
@@ -1779,6 +1784,11 @@ pub enum DriverEvent {
     /// deliberately separate from transcript activities: completing a turn
     /// must not make a detached process or subagent look complete.
     BackgroundWork(BackgroundWorkEvent),
+    /// PIWAKU: authoritative snapshot of the agent-owned task list (Pi's
+    /// rpiv-todo). Like background work this is session state, not turn
+    /// output — it must survive turn boundaries and never lands in the
+    /// transcript.
+    TodoStateUpdated(TodoSnapshot),
     Permission {
         request_id: String,
         title: String,
@@ -1819,12 +1829,35 @@ pub enum DriverEvent {
     /// or (`None`) cleared. Carries the whole goal so late subscribers need
     /// no earlier event.
     GoalUpdated(Option<ThreadGoal>),
+    /// The provider's native interaction mode changed outside Waku's mode
+    /// control (for example, Pi's plan-mode extension persisted a transition).
+    InteractionModeUpdated(InteractionMode),
+    /// A provider extension asks the host to show a short, non-transcript
+    /// notification. Pi's RPC `notify` is fire-and-forget, so this event does
+    /// not carry a request id or expect a response.
+    Notification {
+        message: String,
+        level: String,
+    },
+    /// The session-scoped status published by Magic Context. `None` clears
+    /// the status when the extension sends an empty `setStatus` value.
+    MagicContextStatusUpdated(Option<MagicContextStatus>),
     TurnFinished {
         success: bool,
         summary: Option<String>,
     },
     Error(String),
     ProcessExited,
+}
+
+/// Small, credential-free status projection from Magic Context. Details from
+/// the extension's custom entry are intentionally not part of the protocol.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MagicContextStatus {
+    pub title: String,
+    pub text: String,
+    pub level: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
@@ -1960,6 +1993,185 @@ pub enum BackgroundWorkEvent {
     },
 }
 
+/// PIWAKU: one installed pi package as the extensions manager shows it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiExtensionInfo {
+    /// The pi settings source string, e.g. "npm:pi-web-access".
+    pub source: String,
+    /// Package name without the transport prefix, e.g. "pi-web-access".
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub scope: PiExtensionScope,
+    pub enabled: bool,
+    /// Whether Waku may change this entry through the extensions manager.
+    /// Entries discovered only by `pi list` are intentionally read-only.
+    #[serde(default)]
+    pub manageable: bool,
+    /// Whether the source came from Pi settings or Waku's disabled record.
+    /// A false value means it was only discovered by Pi at runtime.
+    #[serde(default)]
+    pub configured: bool,
+    /// Sub-paths filtered off through the object form's "-path" entries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filtered: Vec<String>,
+    /// Owning project for project-scope entries; the toggle round-trips it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PiExtensionScope {
+    User,
+    Project,
+}
+
+/// PIWAKU: stable, daemon-host Pi settings surfaced by Settings → Pi.
+/// Unknown Pi settings intentionally stay out of this model.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiSettingsSnapshot {
+    pub global: PiSettingsScopeSnapshot,
+    pub projects: Vec<PiProjectSettingsSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiProjectSettingsSnapshot {
+    pub name: String,
+    pub project_root: PathBuf,
+    pub settings: PiSettingsScopeSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiSettingsScopeSnapshot {
+    pub config_path: PathBuf,
+    pub extensions_path: PathBuf,
+    pub default_provider: Option<String>,
+    pub default_model: Option<String>,
+    pub default_thinking_level: Option<String>,
+    pub quiet_startup: Option<bool>,
+    pub extension_settings: Vec<PiExtensionSettingsGroup>,
+    /// A malformed scope is visible to the client without taking down the
+    /// daemon or hiding a valid sibling scope.
+    pub error: Option<String>,
+}
+
+/// Credential-blind view of the providers configured in Pi's models.json.
+/// The daemon deliberately exposes no arbitrary JSON or credential values.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiProviderSettingsSnapshot {
+    pub models_path: PathBuf,
+    pub providers: Vec<PiProviderSnapshot>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiProviderSnapshot {
+    pub id: String,
+    pub name: Option<String>,
+    pub base_url: Option<String>,
+    pub api: Option<String>,
+    pub api_key_configured: bool,
+    /// Unsupported Pi API kinds are visible but cannot be edited by Waku.
+    pub read_only: bool,
+    pub models: Vec<PiModelSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiModelSnapshot {
+    pub id: String,
+    pub name: String,
+    pub api: Option<String>,
+    /// Unknown model API values are visible but cannot be edited or deleted.
+    pub read_only: bool,
+    pub reasoning: Option<bool>,
+    /// Stable UI value: `text` or `text+image`.
+    pub input: String,
+    pub context_window: Option<u64>,
+    pub max_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PiApiKeyUpdate {
+    Unchanged,
+    Replace(String),
+    Clear,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiExtensionSettingsGroup {
+    pub extension: String,
+    pub entries: Vec<PiExtensionSetting>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PiExtensionSetting {
+    pub key: String,
+    pub value: Value,
+}
+
+/// PIWAKU: authoritative snapshot of the agent-owned task list, rebuilt from
+/// rpiv-todo's `todo` tool results. Every successful tool call returns the
+/// complete list, so the driver never diffs — it replaces wholesale.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoSnapshot {
+    pub tasks: Vec<TodoTask>,
+    pub next_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoTaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoTask {
+    pub id: u64,
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Present-continuous label shown while the task is in progress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_form: Option<String>,
+    pub status: TodoTaskStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<u64>,
+}
+
+impl TodoSnapshot {
+    /// Tasks the panel shows: deleted tasks are tombstones kept only for
+    /// replay compatibility.
+    pub fn visible_tasks(&self) -> impl Iterator<Item = &TodoTask> {
+        self.tasks
+            .iter()
+            .filter(|task| task.status != TodoTaskStatus::Deleted)
+    }
+
+    pub fn completed_count(&self) -> usize {
+        self.visible_tasks()
+            .filter(|task| task.status == TodoTaskStatus::Completed)
+            .count()
+    }
+}
+
 /// A slash command a live provider process advertised for its session.
 ///
 /// Claude's init handshake reports bare names; ACP agents report names with
@@ -2079,6 +2291,23 @@ impl ActivityFileChange {
     }
 }
 
+/// PIWAKU: live progress for long-running tools, extracted by driver-side
+/// adapters from provider-native update payloads. UI layers never parse
+/// provider JSON — they render this. `fraction` is present only when the
+/// provider reports a real ratio; absent means indeterminate, never a guess.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fraction: Option<f32>,
+    /// Provider-native phase slug (e.g. "searching", "generating-summary").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    /// Human-facing line under the row title, e.g. the current query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct ActivityItem {
     pub id: Uuid,
@@ -2117,6 +2346,10 @@ pub struct ActivityItem {
     /// activity fields and leave this empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningBlock>,
+    /// PIWAKU: live tool progress; cleared when the activity completes so the
+    /// row converges to its ordinary settled appearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ActivityProgress>,
 }
 
 impl ActivityItem {
@@ -2144,6 +2377,7 @@ impl ActivityItem {
             display_target,
             display_description: None,
             reasoning: None,
+            progress: None,
         }
     }
 
@@ -2180,6 +2414,12 @@ impl ActivityItem {
 
     pub fn with_failed(mut self, failed: bool) -> Self {
         self.failed = failed;
+        self
+    }
+
+    /// PIWAKU: attach live tool progress to an activity row.
+    pub fn with_progress(mut self, progress: ActivityProgress) -> Self {
+        self.progress = Some(progress);
         self
     }
 

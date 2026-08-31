@@ -23,6 +23,21 @@ pub(super) fn composer_submit_action(
     }
 }
 
+const MAGIC_STATUS_DISPLAY_MAX_CHARS: usize = 512;
+
+fn compact_magic_status_text(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if matches!(character, '\r' | '\n' | '\t') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(MAGIC_STATUS_DISPLAY_MAX_CHARS)
+        .collect()
+}
+
 impl Waku {
     // ── Permission ─────────────────────────────────────────────────────────
 
@@ -221,6 +236,39 @@ impl Waku {
             format!("user-input-{request_id}-{question_index}-continue"),
             cx,
         );
+        // PIWAKU: decline the whole request without answering — providers
+        // resolve the underlying dialog as dismissed and the turn continues.
+        let dismiss_focus = self.transcript_control_focus(
+            format!("user-input-{request_id}-{question_index}-dismiss"),
+            cx,
+        );
+        let dismiss = div()
+            .id(SharedString::from(format!(
+                "user-input-{request_id}-{question_index}-dismiss"
+            )))
+            .track_focus(&dismiss_focus)
+            .tab_index(0)
+            .tab_stop(true)
+            .h(px(26.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text_tertiary)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
+            .active(|style| style.opacity(0.8))
+            .child(tr!("user_input.dismiss"))
+            .on_click(cx.listener(|this, _, _, cx| this.dismiss_user_input(cx)))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.dismiss_user_input(cx);
+                    cx.stop_propagation();
+                }
+            }));
         let back = (question_index > 0).then(|| {
             let focus = self.transcript_control_focus(
                 format!("user-input-{request_id}-{question_index}-back"),
@@ -400,6 +448,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .children(back)
+                        .child(dismiss)
                         .child(div().flex_1())
                         .child(continue_button),
                 ),
@@ -2186,11 +2235,7 @@ impl Waku {
             || self.execute_goal_composer_command(prompt, cx)
     }
 
-    fn execute_resume_composer_command(
-        &mut self,
-        prompt: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    fn execute_resume_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         if !crate::composer_complete::is_resume_submission(prompt) {
             return false;
         }
@@ -2208,14 +2253,16 @@ impl Waku {
     fn execute_goal_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         use crate::composer_complete::GoalCommand;
         use crate::model::{GoalOperation, ThreadGoalStatus};
-        let Some((session_id, command, current_goal)) = self.selected_session().and_then(|session| {
-            let command = crate::composer_complete::parse_goal_submission(
-                session.provider,
-                prompt,
-                &self.slash_command_index,
-            )?;
-            Some((session.id, command, session.thread_goal.clone()))
-        }) else {
+        let Some((session_id, command, current_goal)) =
+            self.selected_session().and_then(|session| {
+                let command = crate::composer_complete::parse_goal_submission(
+                    session.provider,
+                    prompt,
+                    &self.slash_command_index,
+                )?;
+                Some((session.id, command, session.thread_goal.clone()))
+            })
+        else {
             return false;
         };
         match command {
@@ -2789,6 +2836,8 @@ impl Waku {
                     card.child(self.render_composer_attachments(cx))
                 })
                 .child(div().pt(px(2.0)).child(self.composer.clone()))
+                .children(self.render_inline_pi_notification(theme))
+                .children(self.render_magic_context_status(theme))
                 .child(
                     div()
                         .mt(px(8.0))
@@ -2933,6 +2982,71 @@ impl Waku {
                                 })),
                         }),
                 ),
+        )
+    }
+
+    fn render_inline_pi_notification(&self, theme: Theme) -> Option<AnyElement> {
+        let notification = self.inline_pi_notification.as_ref()?;
+        if self.state.selected_session != Some(notification.session_id) {
+            return None;
+        }
+        Some(
+            div()
+                .id("pi-extension-notification")
+                .mt(px(6.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(sp(11.5))
+                .text_color(theme.text_tertiary)
+                .child(icon("icons/info.svg", 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(SharedString::from(notification.message.clone())),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_magic_context_status(&self, theme: Theme) -> Option<AnyElement> {
+        let status = self
+            .selected_session()
+            .and_then(|session| self.runtimes.get(&session.id))
+            .and_then(|runtime| runtime.magic_context_status.as_ref())?;
+        let color = match status.level.as_str() {
+            "error" => theme.danger,
+            "warning" => theme.warning,
+            "success" => theme.success,
+            _ => theme.text_tertiary,
+        };
+        Some(
+            div()
+                .id("magic-context-status")
+                .mt(px(6.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(sp(11.5))
+                .text_color(color)
+                .child(icon("icons/sparkle.svg", 11.0, color))
+                .child(
+                    div()
+                        .flex_none()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(SharedString::from(status.title.clone())),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(theme.text_secondary)
+                        .child(SharedString::from(compact_magic_status_text(&status.text))),
+                )
+                .into_any_element(),
         )
     }
 
@@ -3996,4 +4110,18 @@ pub(super) fn visible_picker_models(
         });
     }
     models
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_magic_status_text;
+
+    #[test]
+    fn magic_status_display_is_single_line_and_bounded() {
+        assert_eq!(
+            compact_magic_status_text("one\ntwo\rthree\tfour"),
+            "one two three four"
+        );
+        assert_eq!(compact_magic_status_text(&"x".repeat(600)).len(), 512);
+    }
 }

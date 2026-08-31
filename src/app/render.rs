@@ -277,6 +277,8 @@ impl Render for Waku {
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
         let permission = self.render_permission(cx);
+        // PIWAKU: persistent agent task list sits above any action panel.
+        let todo_panel = self.render_todo_panel(cx);
         let computer_use = self.render_computer_use_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
@@ -366,6 +368,7 @@ impl Render for Waku {
                             .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                             .into_any_element()
                     })
+                    .children(todo_panel)
                     .children(permission)
                     .when(self.selected_project().is_some(), |element| {
                         element

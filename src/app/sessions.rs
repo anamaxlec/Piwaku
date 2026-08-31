@@ -7,10 +7,18 @@ fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
     !matches!(provider, ProviderKind::Codex | ProviderKind::Amp)
 }
 
-fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode) -> RuntimeMode {
-    current
-        .map(|session| session.runtime_mode)
-        .unwrap_or(remembered)
+pub(super) fn provider_runtime_mode(
+    provider: ProviderKind,
+    current: Option<&AgentSession>,
+    remembered: RuntimeMode,
+) -> RuntimeMode {
+    if matches!(provider, ProviderKind::Pi | ProviderKind::OhMyPi) {
+        RuntimeMode::FullAccess
+    } else {
+        current
+            .map(|session| session.runtime_mode)
+            .unwrap_or(remembered)
+    }
 }
 
 impl Waku {
@@ -273,8 +281,11 @@ impl Waku {
         // A task opened from the current task carries its working access mode.
         // `last_runtime_mode` covers launch and the few creation paths without
         // a selected source task.
-        let runtime_mode =
-            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        let runtime_mode = provider_runtime_mode(
+            provider,
+            self.selected_session(),
+            self.state.last_runtime_mode,
+        );
         let mut session = self.state.new_session(project_id, provider);
         session.runtime_mode = runtime_mode;
         let id = session.id;
@@ -1474,6 +1485,29 @@ impl Waku {
         cx.notify();
     }
 
+    /// PIWAKU: decline a pending structured-question request without
+    /// answering it. Providers resolve the underlying dialog as dismissed —
+    /// Pi extensions treat that as an explicit decline (e.g. ask_user_question
+    /// emits its DECLINE envelope) and keep the turn going.
+    pub(super) fn dismiss_user_input(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            return;
+        };
+        let Some(pending) = runtime.pending_user_input.take() else {
+            return;
+        };
+        runtime.driver.cancel_user_input(pending.request_id);
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.status = SessionStatus::Working;
+        }
+        self.user_input_answer
+            .update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+    }
+
     pub(super) fn respond_computer_permission(
         &mut self,
         decision: &'static str,
@@ -1662,17 +1696,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_task_carries_the_current_tasks_access_mode() {
+    fn provider_runtime_mode_normalizes_pi_and_preserves_other_providers() {
         let mut current = AgentSession::new(Uuid::new_v4(), ProviderKind::OpenCode);
         current.runtime_mode = RuntimeMode::Ask;
 
         assert_eq!(
-            new_task_runtime_mode(Some(&current), RuntimeMode::FullAccess),
+            provider_runtime_mode(
+                ProviderKind::OpenCode,
+                Some(&current),
+                RuntimeMode::FullAccess
+            ),
             RuntimeMode::Ask
         );
         assert_eq!(
-            new_task_runtime_mode(None, RuntimeMode::AutoAcceptEdits),
+            provider_runtime_mode(ProviderKind::Codex, None, RuntimeMode::AutoAcceptEdits),
             RuntimeMode::AutoAcceptEdits
+        );
+        assert_eq!(
+            provider_runtime_mode(ProviderKind::Pi, Some(&current), RuntimeMode::Ask),
+            RuntimeMode::FullAccess
+        );
+        assert_eq!(
+            provider_runtime_mode(ProviderKind::OhMyPi, None, RuntimeMode::Auto),
+            RuntimeMode::FullAccess
         );
     }
 

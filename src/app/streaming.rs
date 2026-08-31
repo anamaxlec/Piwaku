@@ -154,6 +154,13 @@ impl Waku {
                     if item.reasoning.is_some() {
                         activity.reasoning = item.reasoning;
                     }
+                    // PIWAKU: live progress replaces in place; completion
+                    // clears it so the row converges to its settled look.
+                    if item.complete {
+                        activity.progress = None;
+                    } else if item.progress.is_some() {
+                        activity.progress = item.progress;
+                    }
                     session.updated_at = unix_time();
                     runtime.stream_phase = Some(StreamPhase::Activity);
                     if replaces_changes {
@@ -337,6 +344,12 @@ impl Waku {
                 // `accepts_turn_output` deliberately.
                 self.handle_background_work_event(session_id, event);
             }
+            DriverEvent::TodoStateUpdated(snapshot) => {
+                // PIWAKU: agent-owned task list — session state like
+                // background work, never turn output.
+                runtime.todo_state = Some(snapshot);
+                cx.notify();
+            }
             DriverEvent::Permission {
                 request_id,
                 title,
@@ -482,6 +495,34 @@ impl Waku {
                         self.state.mark_session_dirty(session_id);
                     }
                 }
+            }
+            DriverEvent::InteractionModeUpdated(mode) => {
+                // A provider-owned mode transition is already authoritative;
+                // update the projection only. Calling the UI mode setter here
+                // would re-apply session options and create a feedback loop.
+                let changed = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(|session| session.interaction_mode != mode);
+                if changed && let Some(session) = self.state.session_mut(session_id) {
+                    session.interaction_mode = mode;
+                }
+            }
+            DriverEvent::Notification { message, level } => {
+                // Routine extension lifecycle messages stay below the
+                // composer; only warning/error notifications interrupt.
+                match pi_notification_presentation(&level) {
+                    PiNotificationPresentation::Inline => {
+                        self.show_inline_pi_notification(session_id, message, cx);
+                    }
+                    PiNotificationPresentation::Alert => self.show_toast(message),
+                }
+            }
+            DriverEvent::MagicContextStatusUpdated(status) => {
+                runtime.magic_context_status = status;
+                cx.notify();
             }
             DriverEvent::UsageUpdated {
                 context_tokens,

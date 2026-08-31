@@ -19,11 +19,14 @@ use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use super::{activity, computer_use as computer_use_runtime};
+use super::{activity, computer_use as computer_use_runtime, pi_extensions, tool_progress};
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
-use crate::model::{ActivityKind, DriverEvent, InteractionMode, ProviderResumeCursor, RuntimeMode};
+use crate::model::{
+    ActivityKind, DriverEvent, GoalOperation, InteractionMode, ProviderResumeCursor, RuntimeMode,
+    UserInputAnswer,
+};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -111,6 +114,10 @@ impl PiFlavor {
         matches!(self, Self::Pi)
     }
 
+    fn supports_interaction_mode(self, mode: InteractionMode) -> bool {
+        matches!(self, Self::Pi) || mode == InteractionMode::Build
+    }
+
     fn cursor(self, session_id: String, session_file: Option<PathBuf>) -> ProviderResumeCursor {
         match self {
             Self::Pi => ProviderResumeCursor::Pi {
@@ -148,6 +155,14 @@ enum CommandMessage {
     Steer(String),
     Cancel,
     CancelExtensionRequest(String),
+    /// PIWAKU: a goal mutation for the pi-goal plugin (Refresh/Clear/Set).
+    Goal(GoalOperation),
+    /// A fully-built `extension_ui_response` frame for a dialog the native
+    /// question panel already answered. Prebuilt so the writer thread stays
+    /// free of answer-interpretation logic.
+    RespondExtensionUi {
+        payload: Value,
+    },
     Options(SessionOptions),
     Rollback {
         turns: usize,
@@ -162,9 +177,32 @@ enum CommandMessage {
 
 type PendingResponses = Arc<Mutex<HashMap<String, Sender<Result<Value, String>>>>>;
 
+/// Extension dialog requests awaiting an answer from the native question
+/// panel. The reader thread inserts on `extension_ui_request`; answering
+/// (or turn teardown) removes. Shared between reader and command threads.
+type PendingExtensionUiRequests = Arc<Mutex<HashMap<String, pi_extensions::PendingExtensionUi>>>;
+
+/// Non-JSON lines observed on the provider's stdout. Extensions run in-process
+/// and share its stdout, so any stray `console.log` surfaces here; captured and
+/// counted instead of surfaced per line.
+#[derive(Default)]
+struct StdoutChatter {
+    count: u64,
+    last: Option<String>,
+}
+
+impl StdoutChatter {
+    fn record(&mut self, line: &str) {
+        self.count += 1;
+        let truncated: String = line.trim().chars().take(200).collect();
+        self.last = Some(truncated);
+    }
+}
+
 pub struct PiDriver {
     flavor: PiFlavor,
     commands: Sender<CommandMessage>,
+    pending_extension_ui: PendingExtensionUiRequests,
     computer_use: Option<computer_use_runtime::ComputerUseRuntime>,
 }
 
@@ -206,9 +244,9 @@ impl PiDriver {
             computer_use_enabled,
             provider_cursor,
         } = options;
-        if mode != RuntimeMode::FullAccess || interaction_mode != InteractionMode::Build {
+        if mode != RuntimeMode::FullAccess || !flavor.supports_interaction_mode(interaction_mode) {
             return Err(anyhow!(
-                "{} currently supports Build with Full access only",
+                "{} currently supports only its native interaction modes with Full access",
                 flavor.display_name()
             ));
         }
@@ -231,6 +269,7 @@ impl PiDriver {
             }
             None => None,
         };
+        let new_session = resume_session_file.is_none();
         if let Some(model) = model.as_deref() {
             parse_model_slug(model)?;
         }
@@ -275,10 +314,18 @@ impl PiDriver {
             .ok_or_else(|| anyhow!("{} stderr unavailable", flavor.display_name()))?;
 
         let (commands, command_rx) = unbounded();
+        let pending_extension_ui: PendingExtensionUiRequests = Arc::new(Mutex::new(HashMap::new()));
+        let waiter_extension_ui = pending_extension_ui.clone();
+        let stdout_chatter = Arc::new(Mutex::new(StdoutChatter::default()));
+        let reader_chatter = stdout_chatter.clone();
+        let waiter_chatter = stdout_chatter.clone();
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let driver_session_state_file: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
         let reader_pending = pending.clone();
+        let reader_extension_ui = pending_extension_ui.clone();
         let reader_commands = commands.clone();
         let reader_events = events.clone();
+        let reader_session_state_file = driver_session_state_file.clone();
         let reader_thread =
             thread::Builder::new()
                 .name("waku-pi-reader".into())
@@ -299,9 +346,11 @@ impl PiDriver {
                                                 flavor,
                                                 value,
                                                 &reader_pending,
+                                                &reader_extension_ui,
                                                 &reader_commands,
                                                 &reader_events,
                                                 &mut stream_state,
+                                                &reader_session_state_file,
                                             ),
                                             Ok(None) => {}
                                             Err(error) => {
@@ -314,12 +363,25 @@ impl PiDriver {
                                             }
                                         }
                                     }
-                                    Err(error) => {
-                                        let _ = reader_events.send(DriverEvent::Error(tr!(
-                                            "errors.provider_invalid_json",
-                                            provider = flavor.display_name(),
-                                            error = error
-                                        )));
+                                    Err(_) => {
+                                        // PIWAKU: extensions share the
+                                        // process's stdout, so one stray
+                                        // `console.log` anywhere lands on the
+                                        // RPC stream. That is chatter, not a
+                                        // protocol failure — it never breaks
+                                        // the turn — so announce it once with
+                                        // the offending snippet instead of
+                                        // spamming an error per line.
+                                        let mut chatter = reader_chatter.lock();
+                                        chatter.record(&line);
+                                        if chatter.count == 1 {
+                                            let snippet = chatter.last.clone().unwrap_or_default();
+                                            let _ = reader_events.send(DriverEvent::Error(tr!(
+                                                "errors.provider_stdout_noise",
+                                                provider = flavor.display_name(),
+                                                snippet = snippet
+                                            )));
+                                        }
                                     }
                                 }
                             }
@@ -345,6 +407,8 @@ impl PiDriver {
 
         let writer_pending = pending;
         let writer_events = events.clone();
+        let writer_session_state_file = driver_session_state_file.clone();
+
         thread::Builder::new()
             .name("waku-pi-writer".into())
             .spawn(move || {
@@ -448,6 +512,27 @@ impl PiDriver {
                     });
                     return;
                 };
+                let plan_command_error = if flavor == PiFlavor::Pi {
+                    match send_request(
+                        &mut stdin,
+                        &writer_pending,
+                        &mut next_request_id,
+                        json!({"type": "get_commands"}),
+                    ) {
+                        Ok(response) if pi_has_plan_command(&response) => None,
+                        Ok(_) => Some("Pi /plan command is unavailable; staying in Build mode".to_owned()),
+                        Err(error) => Some(format!(
+                            "Pi /plan command availability check failed ({error}); staying in Build mode"
+                        )),
+                    }
+                } else {
+                    None
+                };
+                let mut current_interaction_mode = if new_session {
+                    InteractionMode::Build
+                } else {
+                    interaction_mode
+                };
                 let initial_usage = send_request(
                     &mut stdin,
                     &writer_pending,
@@ -457,6 +542,109 @@ impl PiDriver {
                 .ok()
                 .and_then(|stats| pi_context_usage(&state, Some(&stats)))
                 .or_else(|| pi_context_usage(&state, None));
+                // PIWAKU: hydrate the native todo panel from the active Pi
+                // branch. A missing/failed read is deliberately non-fatal;
+                // new sessions simply have no persisted snapshot yet.
+                if flavor == PiFlavor::Pi
+                    && let Ok(entries) = send_request(
+                        &mut stdin,
+                        &writer_pending,
+                        &mut next_request_id,
+                        json!({"type": "get_entries"}),
+                    )
+                    && let Some(snapshot) =
+                        pi_extensions::parse_latest_todo_snapshot_from_entries(&entries)
+                {
+                    let _ = writer_events.send(DriverEvent::TodoStateUpdated(snapshot));
+                }
+                // PIWAKU: track the session file so provider extensions can
+                // publish their persisted custom state (resume path included).
+                if let ProviderResumeCursor::Pi { session_file, .. } = &cursor {
+                    *writer_session_state_file.lock() = session_file.clone();
+                    if let Some(session_file) = session_file {
+                        if let Some(goal) = pi_extensions::read_goal_from_session_file(session_file)
+                        {
+                            let _ = writer_events.send(DriverEvent::GoalUpdated(Some(goal)));
+                        }
+                    }
+                    if !new_session && let Some(error) = &plan_command_error {
+                        let _ = writer_events.send(DriverEvent::Error(error.clone()));
+                        current_interaction_mode = InteractionMode::Build;
+                        let _ = writer_events
+                            .send(DriverEvent::InteractionModeUpdated(InteractionMode::Build));
+                    } else if let Some(session_file) = session_file
+                        && let Some(mode) =
+                            pi_extensions::read_plan_mode_from_session_file(session_file)
+                    {
+                        current_interaction_mode = mode;
+                        let _ = writer_events.send(DriverEvent::InteractionModeUpdated(mode));
+                    }
+                    let _ = writer_events.send(DriverEvent::MagicContextStatusUpdated(
+                        session_file
+                            .as_deref()
+                            .and_then(pi_extensions::read_magic_status_from_session_file),
+                    ));
+                }
+                if new_session
+                    && flavor == PiFlavor::Pi
+                    && interaction_mode == InteractionMode::Plan
+                {
+                    if let Some(error) = &plan_command_error {
+                        let _ = writer_events.send(DriverEvent::Error(error.clone()));
+                        let _ = writer_events
+                            .send(DriverEvent::InteractionModeUpdated(InteractionMode::Build));
+                        let _ = writer_events.send(DriverEvent::TurnFinished {
+                            success: false,
+                            summary: Some(tr!(
+                                "errors.provider_initialize_session",
+                                provider = flavor.display_name()
+                            )),
+                        });
+                        return;
+                    }
+                    if let Err(error) = send_request(
+                        &mut stdin,
+                        &writer_pending,
+                        &mut next_request_id,
+                        json!({
+                            "type": "prompt",
+                            "message": pi_plan_mode_command(InteractionMode::Plan)
+                        }),
+                    ) {
+                        let _ = writer_events.send(DriverEvent::Error(tr!(
+                            "errors.provider_rejected_prompt_detail",
+                            provider = flavor.display_name(),
+                            error = error
+                        )));
+                        let _ = writer_events
+                            .send(DriverEvent::InteractionModeUpdated(InteractionMode::Build));
+                        let _ = writer_events.send(DriverEvent::TurnFinished {
+                            success: false,
+                            summary: Some(tr!(
+                                "errors.provider_rejected_prompt",
+                                provider = flavor.display_name()
+                            )),
+                        });
+                        return;
+                    }
+                    if let Some(session_file) = writer_session_state_file.lock().clone() {
+                        if let Some(mode) = emit_pi_interaction_mode(&writer_events, &session_file)
+                        {
+                            current_interaction_mode = mode;
+                        } else {
+                            let _ = writer_events.send(DriverEvent::InteractionModeUpdated(
+                                current_interaction_mode,
+                            ));
+                        }
+                        let _ = writer_events.send(DriverEvent::MagicContextStatusUpdated(
+                            pi_extensions::read_magic_status_from_session_file(&session_file),
+                        ));
+                    } else {
+                        let _ = writer_events.send(DriverEvent::InteractionModeUpdated(
+                            current_interaction_mode,
+                        ));
+                    }
+                }
                 let _ = writer_events.send(DriverEvent::Connected {
                     provider_cursor: Some(cursor.clone()),
                 });
@@ -488,19 +676,40 @@ impl PiDriver {
                                 &mut next_request_id,
                                 json!({"type": "prompt", "message": prompt}),
                             );
-                            if let Err(error) = result {
-                                let _ = writer_events.send(DriverEvent::Error(tr!(
-                                    "errors.provider_rejected_prompt_detail",
-                                    provider = flavor.display_name(),
-                                    error = error
-                                )));
-                                let _ = writer_events.send(DriverEvent::TurnFinished {
-                                    success: false,
-                                    summary: Some(tr!(
-                                        "errors.provider_rejected_prompt",
-                                        provider = flavor.display_name()
-                                    )),
-                                });
+                            match result {
+                                Ok(_) => {
+                                    if flavor == PiFlavor::Pi
+                                        && let Some(session_file) =
+                                            writer_session_state_file.lock().clone()
+                                    {
+                                        if let Some(mode) =
+                                            emit_pi_interaction_mode(&writer_events, &session_file)
+                                        {
+                                            current_interaction_mode = mode;
+                                        }
+                                        let _ = writer_events.send(
+                                            DriverEvent::MagicContextStatusUpdated(
+                                                pi_extensions::read_magic_status_from_session_file(
+                                                    &session_file,
+                                                ),
+                                            ),
+                                        );
+                                    }
+                                }
+                                Err(error) => {
+                                    let _ = writer_events.send(DriverEvent::Error(tr!(
+                                        "errors.provider_rejected_prompt_detail",
+                                        provider = flavor.display_name(),
+                                        error = error
+                                    )));
+                                    let _ = writer_events.send(DriverEvent::TurnFinished {
+                                        success: false,
+                                        summary: Some(tr!(
+                                            "errors.provider_rejected_prompt",
+                                            provider = flavor.display_name()
+                                        )),
+                                    });
+                                }
                             }
                         }
                         CommandMessage::Steer(prompt) => {
@@ -537,6 +746,38 @@ impl PiDriver {
                                 )));
                             }
                         }
+                        CommandMessage::Goal(operation) => match operation {
+                            GoalOperation::Refresh => {
+                                // The daemon asks to re-read state; the
+                                // driver owns no goal cache of its own.
+                            }
+                            GoalOperation::Clear => {
+                                let _ = send_request(
+                                    &mut stdin,
+                                    &writer_pending,
+                                    &mut next_request_id,
+                                    json!({"type": "prompt", "message": "/goal clear"}),
+                                );
+                            }
+                            GoalOperation::Set {
+                                objective, status, ..
+                            } => {
+                                let message =
+                                    pi_extensions::goal_prompt_for_operation(&GoalOperation::Set {
+                                        objective: objective.clone(),
+                                        status,
+                                        replace: false,
+                                    });
+                                if let Some(message) = message {
+                                    let _ = send_request(
+                                        &mut stdin,
+                                        &writer_pending,
+                                        &mut next_request_id,
+                                        json!({"type": "prompt", "message": message}),
+                                    );
+                                }
+                            }
+                        },
                         CommandMessage::Options(options) => {
                             if options.model != current_model {
                                 match options.model.as_deref().map(parse_model_slug).transpose() {
@@ -600,6 +841,81 @@ impl PiDriver {
                                 }
                                 current_effort = options.reasoning_effort;
                             }
+                            if flavor == PiFlavor::Pi {
+                                // A user-entered `/plan` command or a plugin
+                                // change may have updated the session since
+                                // the last Options message. Read the
+                                // provider's state before deciding whether a
+                                // transition is needed; this is not a second
+                                // persisted cache.
+                                if let Some(session_file) = writer_session_state_file.lock().clone()
+                                    && let Some(mode) =
+                                        pi_extensions::read_plan_mode_from_session_file(
+                                            &session_file,
+                                        )
+                                {
+                                    current_interaction_mode = mode;
+                                }
+                            }
+                            if flavor == PiFlavor::Pi
+                                && options.interaction_mode != current_interaction_mode
+                            {
+                                let requested_mode = options.interaction_mode;
+                                if let Some(error) = &plan_command_error {
+                                    let _ = writer_events.send(DriverEvent::Error(error.clone()));
+                                    current_interaction_mode = InteractionMode::Build;
+                                    let _ = writer_events.send(DriverEvent::InteractionModeUpdated(
+                                        InteractionMode::Build,
+                                    ));
+                                    continue;
+                                }
+                                match send_request(
+                                    &mut stdin,
+                                    &writer_pending,
+                                    &mut next_request_id,
+                                    json!({
+                                        "type": "prompt",
+                                        "message": pi_plan_mode_command(requested_mode)
+                                    }),
+                                ) {
+                                    Ok(_) => {
+                                        if let Some(session_file) =
+                                            writer_session_state_file.lock().clone()
+                                        {
+                                            if let Some(mode) = emit_pi_interaction_mode(
+                                                &writer_events,
+                                                &session_file,
+                                            ) {
+                                                current_interaction_mode = mode;
+                                            } else {
+                                                let _ = writer_events.send(
+                                                    DriverEvent::InteractionModeUpdated(
+                                                        current_interaction_mode,
+                                                    ),
+                                                );
+                                            }
+                                        } else {
+                                            let _ = writer_events.send(
+                                                DriverEvent::InteractionModeUpdated(
+                                                    current_interaction_mode,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    Err(error) => {
+                                        let _ = writer_events.send(DriverEvent::Error(tr!(
+                                            "errors.provider_rejected_prompt_detail",
+                                            provider = flavor.display_name(),
+                                            error = error
+                                        )));
+                                        let _ = writer_events.send(
+                                            DriverEvent::InteractionModeUpdated(
+                                                current_interaction_mode,
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
                         }
                         CommandMessage::CancelExtensionRequest(id) => {
                             if write_json_line(
@@ -612,6 +928,11 @@ impl PiDriver {
                             )
                             .is_err()
                             {
+                                break;
+                            }
+                        }
+                        CommandMessage::RespondExtensionUi { payload } => {
+                            if write_json_line(&mut stdin, &payload).is_err() {
                                 break;
                             }
                         }
@@ -679,13 +1000,24 @@ impl PiDriver {
                 let status = child.wait();
                 let _ = reader_thread.join();
                 let _ = stderr_thread.join();
+                // Any dialog still pending can never be answered now.
+                waiter_extension_ui.lock().clear();
+                let chatter_count = waiter_chatter.lock().count;
                 match status {
                     Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
-                        let _ = events.send(DriverEvent::Error(tr!(
+                        let mut message = tr!(
                             "errors.provider_rpc_exited",
                             provider = flavor.display_name(),
                             status = status
-                        )));
+                        );
+                        if chatter_count > 0 {
+                            // PIWAKU: unclean exits are easier to diagnose
+                            // when the captured stdout chatter is mentioned.
+                            message.push_str(&format!(
+                                " (also saw {chatter_count} non-JSON stdout line(s))"
+                            ));
+                        }
+                        let _ = events.send(DriverEvent::Error(message));
                     }
                     Err(error) => {
                         let _ = events.send(DriverEvent::Error(tr!(
@@ -702,6 +1034,7 @@ impl PiDriver {
         Ok(Self {
             flavor,
             commands,
+            pending_extension_ui,
             computer_use,
         })
     }
@@ -710,6 +1043,13 @@ impl PiDriver {
 impl DriverControl for PiDriver {
     fn prompt(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Prompt(prompt));
+    }
+
+    /// PIWAKU: goal state lives in pi-goal's session entries; Refresh
+    /// re-reads them, Set/Clear steer the plugin's own `/goal` command so
+    /// its runtime (continuation, budgets, safety) stays authoritative.
+    fn goal(&self, operation: GoalOperation) {
+        let _ = self.commands.send(CommandMessage::Goal(operation));
     }
 
     fn supports_steer(&self) -> bool {
@@ -730,15 +1070,81 @@ impl DriverControl for PiDriver {
         }
     }
 
-    fn respond(&self, _request_id: String, _option_id: String) {}
+    /// Answer a permission select from the native permission panel. The
+    /// permission extension expects the original label as the select value;
+    /// Waku therefore validates the provider option id against the pending
+    /// request before reusing the normal extension response builder.
+    fn respond(&self, request_id: String, option_id: String) {
+        let payload = {
+            let mut pending = self.pending_extension_ui.lock();
+            let Some(record) = pending.get(&request_id) else {
+                return;
+            };
+            if !record.permission || !record.option_labels.iter().any(|label| label == &option_id) {
+                return;
+            }
+            let record = pending.remove(&request_id).expect("pending record exists");
+            record.build_response(
+                &request_id,
+                &[UserInputAnswer {
+                    question_id: request_id.clone(),
+                    answers: vec![option_id],
+                }],
+            )
+        };
+        let Some(payload) = payload else {
+            return;
+        };
+        let _ = self
+            .commands
+            .send(CommandMessage::RespondExtensionUi { payload });
+    }
+
+    /// Answer an extension dialog from the native question panel. The request
+    /// must still be pending; a stale id (already answered, turn settled, or
+    /// process gone) is dropped silently — Pi ignores responses for unknown
+    /// ids anyway.
+    fn respond_user_input(&self, request_id: String, answers: Vec<UserInputAnswer>) {
+        let payload = {
+            let mut pending = self.pending_extension_ui.lock();
+            let Some(record) = pending.remove(&request_id) else {
+                return;
+            };
+            match record.build_response(&request_id, &answers) {
+                Some(payload) => payload,
+                None => return,
+            }
+        };
+        let _ = self
+            .commands
+            .send(CommandMessage::RespondExtensionUi { payload });
+    }
+
+    /// Decline the dialog: Pi resolves the extension's promise with
+    /// `cancelled`, which extensions treat as an explicit user decline (e.g.
+    /// ask_user_question's DECLINE envelope) rather than an error.
+    fn cancel_user_input(&self, request_id: String) {
+        if self
+            .pending_extension_ui
+            .lock()
+            .remove(&request_id)
+            .is_none()
+        {
+            return;
+        }
+        let _ = self
+            .commands
+            .send(CommandMessage::CancelExtensionRequest(request_id));
+    }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
-        // Both flavors have setters for the model and thinking level, so those
-        // apply to the live session. Neither exposes one for permissions — and
-        // Waku only runs them in Build with Full access anyway — so a mode
-        // change asks for a fresh start, which is where that is reported.
+        // Both flavors have setters for the model and thinking level, and Pi's
+        // plan-mode extension accepts live Build/Plan transitions. Oh My Pi
+        // remains Build-only because it does not share that extension.
         if options.mode != RuntimeMode::FullAccess
-            || options.interaction_mode != InteractionMode::Build
+            || !self
+                .flavor
+                .supports_interaction_mode(options.interaction_mode)
         {
             return false;
         }
@@ -867,6 +1273,34 @@ fn cursor_from_state(flavor: PiFlavor, response: &Value) -> Option<ProviderResum
         .and_then(Value::as_str)
         .map(PathBuf::from);
     Some(flavor.cursor(session_id.to_owned(), session_file))
+}
+
+fn emit_pi_interaction_mode(
+    events: &impl DriverEventSink,
+    session_file: &Path,
+) -> Option<InteractionMode> {
+    let mode = pi_extensions::read_plan_mode_from_session_file(session_file)?;
+    let _ = events.send(DriverEvent::InteractionModeUpdated(mode));
+    Some(mode)
+}
+
+fn pi_has_plan_command(response: &Value) -> bool {
+    response
+        .pointer("/data/commands")
+        .and_then(Value::as_array)
+        .is_some_and(|commands| {
+            commands.iter().any(|command| {
+                command.get("name").and_then(Value::as_str) == Some("plan")
+                    && command.get("source").and_then(Value::as_str) == Some("extension")
+            })
+        })
+}
+
+fn pi_plan_mode_command(mode: InteractionMode) -> &'static str {
+    match mode {
+        InteractionMode::Build => "/plan exit",
+        InteractionMode::Plan => "/plan start",
+    }
 }
 
 /// Reassembles the `rpc_chunk` runs Oh My Pi emits for frames over its 1 MiB
@@ -1194,9 +1628,13 @@ fn handle_pi_message(
     flavor: PiFlavor,
     value: Value,
     pending: &PendingResponses,
-    commands: &Sender<CommandMessage>,
+    pending_extension_ui: &PendingExtensionUiRequests,
+    // Unused since extension dialogs stopped being auto-cancelled here; the
+    // ask_user_question interception adapter will send through it again.
+    _commands: &Sender<CommandMessage>,
     events: &impl DriverEventSink,
     state: &mut PiStreamState,
+    session_state_file: &Mutex<Option<PathBuf>>,
 ) {
     let event_type = value
         .get("type")
@@ -1251,6 +1689,22 @@ fn handle_pi_message(
                     )
                 }),
             });
+        }
+        // Dialogs never outlive the turn that opened them; Pi aborts their
+        // tool calls on settle, so any leftover entry is stale.
+        pending_extension_ui.lock().clear();
+        // PIWAKU: pi-goal writes its `goal-state` entries during turns (the
+        // agent may have run `/goal …` itself); re-read on every settle so
+        // the panel tracks the plugin without extra protocol.
+        if let Some(session_file) = session_state_file.lock().clone() {
+            let refreshed = pi_extensions::read_goal_from_session_file(&session_file);
+            let _ = events.send(DriverEvent::GoalUpdated(refreshed));
+            if flavor == PiFlavor::Pi {
+                let _ = emit_pi_interaction_mode(events, &session_file);
+                let _ = events.send(DriverEvent::MagicContextStatusUpdated(
+                    pi_extensions::read_magic_status_from_session_file(&session_file),
+                ));
+            }
         }
         *state = PiStreamState::default();
         return;
@@ -1348,7 +1802,16 @@ fn handle_pi_message(
             };
             let complete = event_type == "tool_execution_end";
             let failed = value.get("isError").and_then(Value::as_bool) == Some(true);
-            let item = activity::tool_activity(
+            // PIWAKU: rpiv-todo returns the full task list on every call —
+            // feed the native task panel.
+            if complete
+                && !failed
+                && tool_name == Some("todo")
+                && let Some(snapshot) = output.and_then(pi_extensions::parse_todo_snapshot)
+            {
+                let _ = events.send(DriverEvent::TodoStateUpdated(snapshot));
+            }
+            let mut item = activity::tool_activity(
                 id.clone(),
                 kind,
                 title,
@@ -1358,6 +1821,23 @@ fn handle_pi_message(
                 failed,
                 complete,
             );
+            // PIWAKU: structured progress from provider-native update
+            // payloads (pi-web-access first); completion clears it so the
+            // row converges to its settled appearance.
+            if !complete
+                && let Some(progress) =
+                    tool_progress::extract_progress(tool_name, arguments, output)
+            {
+                item = item.with_progress(progress);
+            }
+            // PIWAKU: settled web-access rows carry the TUI's status line
+            // ("11 sources", "Title (8529 chars)") so completion is visible.
+            if complete
+                && !failed
+                && let Some(summary) = tool_progress::completion_summary(tool_name, output)
+            {
+                item.display_description = Some(summary);
+            }
             let _ = events.send(DriverEvent::RichActivity(item));
             if complete && let Some(id) = id {
                 state.tools.remove(&id);
@@ -1379,12 +1859,47 @@ fn handle_pi_message(
             }
         }
         "extension_ui_request" => {
-            let method = value.get("method").and_then(Value::as_str);
-            let id = value.get("id").and_then(Value::as_str);
-            if matches!(method, Some("select" | "confirm" | "input" | "editor"))
-                && let Some(id) = id
+            if flavor == PiFlavor::Pi
+                && let Some(parsed) = pi_extensions::parse_pi_ui_request(&value)
             {
-                let _ = commands.send(CommandMessage::CancelExtensionRequest(id.to_owned()));
+                match parsed {
+                    pi_extensions::ParsedPiUiRequest::Notify { message, level } => {
+                        let _ = events.send(DriverEvent::Notification { message, level });
+                    }
+                    pi_extensions::ParsedPiUiRequest::Status { text } => {
+                        let status = text.map(|text| crate::model::MagicContextStatus {
+                            title: "Magic Context".to_owned(),
+                            text,
+                            level: "info".to_owned(),
+                        });
+                        let _ = events.send(DriverEvent::MagicContextStatusUpdated(status));
+                    }
+                }
+            } else if let Some(parsed) = pi_extensions::parse_permission_request(&value) {
+                // PIWAKU: @gotgenes/pi-permission-system's RPC fallback uses
+                // a stable select shape. Surface it as a native permission;
+                // the pending record retains the original labels for respond.
+                pending_extension_ui
+                    .lock()
+                    .insert(parsed.id.clone(), parsed.pending);
+                let _ = events.send(DriverEvent::Permission {
+                    request_id: parsed.id,
+                    title: parsed.title,
+                    detail: parsed.detail,
+                    options: parsed.options,
+                });
+            } else if let Some(parsed) = pi_extensions::parse_extension_ui_request(&value) {
+                // PIWAKU: route other extension dialogs to the native question
+                // panel instead of auto-cancelling them. Fire-and-forget and
+                // unknown methods return None here and are ignored, which
+                // keeps unsupported extensions from crashing the runtime.
+                pending_extension_ui
+                    .lock()
+                    .insert(parsed.id.clone(), parsed.pending);
+                let _ = events.send(DriverEvent::UserInputRequested {
+                    request_id: parsed.id,
+                    questions: parsed.questions,
+                });
             }
         }
         "extension_error" => {
@@ -1484,6 +1999,17 @@ mod tests {
         )
     }
 
+    /// Fresh extension-dialog registry for tests that don't exercise the
+    /// dialog bridge.
+    /// Tests run without a Pi session file; the goal hooks become no-ops.
+    fn no_goal_file() -> Mutex<Option<PathBuf>> {
+        Mutex::new(None)
+    }
+
+    fn no_extension_ui() -> PendingExtensionUiRequests {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
     /// Drives the installed Pi RPC through one real provider turn. Ignored by
     /// default because it needs the CLI, credentials, and network access.
     #[test]
@@ -1552,11 +2078,12 @@ mod tests {
     }
 
     #[test]
-    fn model_and_thinking_changes_reach_the_running_session_but_mode_changes_do_not() {
+    fn model_thinking_and_pi_mode_changes_reach_the_running_session() {
         let (commands, command_rx) = unbounded();
         let driver = PiDriver {
             flavor: PiFlavor::Pi,
             commands,
+            pending_extension_ui: no_extension_ui(),
             computer_use: None,
         };
         let options = |mode, interaction_mode| SessionOptions {
@@ -1574,10 +2101,43 @@ mod tests {
             Ok(CommandMessage::Options(_))
         ));
 
-        // Pi has no permission setter, and only runs Build with Full access.
+        assert!(driver.apply_options(options(RuntimeMode::FullAccess, InteractionMode::Plan)));
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(CommandMessage::Options(_))
+        ));
+
+        // Pi has no permission setter, and still requires Full access.
         assert!(!driver.apply_options(options(RuntimeMode::Ask, InteractionMode::Build)));
-        assert!(!driver.apply_options(options(RuntimeMode::FullAccess, InteractionMode::Plan)));
         assert!(command_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn interaction_mode_eligibility_is_flavor_specific() {
+        assert!(PiFlavor::Pi.supports_interaction_mode(InteractionMode::Build));
+        assert!(PiFlavor::Pi.supports_interaction_mode(InteractionMode::Plan));
+        assert!(PiFlavor::OhMyPi.supports_interaction_mode(InteractionMode::Build));
+        assert!(!PiFlavor::OhMyPi.supports_interaction_mode(InteractionMode::Plan));
+    }
+
+    #[test]
+    fn pi_plan_mode_commands_match_the_extension() {
+        assert_eq!(pi_plan_mode_command(InteractionMode::Plan), "/plan start");
+        assert_eq!(pi_plan_mode_command(InteractionMode::Build), "/plan exit");
+    }
+
+    #[test]
+    fn pi_plan_command_availability_requires_a_registered_plan_name() {
+        assert!(pi_has_plan_command(&json!({
+            "data": {"commands": [{"name": "plan", "source": "extension"}, {"name": "other"}]}
+        })));
+        assert!(!pi_has_plan_command(&json!({
+            "data": {"commands": [{"name": "plan", "source": "prompt"}]}
+        })));
+        assert!(!pi_has_plan_command(&json!({
+            "data": {"commands": [{"name": "other", "source": "extension"}]}
+        })));
+        assert!(!pi_has_plan_command(&json!({"data": {"commands": "plan"}})));
     }
 
     #[test]
@@ -1689,9 +2249,11 @@ mod tests {
                 PiFlavor::Pi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -1732,6 +2294,53 @@ mod tests {
             DriverEvent::TurnFinished { success: true, .. }
         ));
         assert!(matches!(event_rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn pi_settled_reloads_persisted_plan_mode() {
+        let dir =
+            std::env::temp_dir().join(format!("piwaku-pi-plan-mode-event-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("session.jsonl");
+        std::fs::write(
+            &file,
+            r#"{"type":"custom","customType":"plan-mode-state","data":{"enabled":true}}"#,
+        )
+        .unwrap();
+
+        let (pending, commands, _command_rx, mut state) = harness();
+        state.run_started = true;
+        let (events, event_rx) = unbounded();
+        let session_state_file = Mutex::new(Some(file.clone()));
+        handle_pi_message(
+            PiFlavor::Pi,
+            json!({"type": "agent_settled"}),
+            &pending,
+            &no_extension_ui(),
+            &commands,
+            &events,
+            &mut state,
+            &session_state_file,
+        );
+
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::TurnFinished { success: true, .. }
+        ));
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::GoalUpdated(None)
+        ));
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::InteractionModeUpdated(InteractionMode::Plan)
+        ));
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::MagicContextStatusUpdated(None)
+        ));
+        assert!(matches!(event_rx.try_recv(), Err(TryRecvError::Empty)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Drives the installed Oh My Pi RPC through one real provider turn.
@@ -1843,9 +2452,11 @@ mod tests {
                 PiFlavor::OhMyPi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -1879,7 +2490,16 @@ mod tests {
                 json!({"type": "session_info_update", "title": "Oh My Pi's spelling"}),
             ),
         ] {
-            handle_pi_message(flavor, value, &pending, &commands, &events, &mut state);
+            handle_pi_message(
+                flavor,
+                value,
+                &pending,
+                &no_extension_ui(),
+                &commands,
+                &events,
+                &mut state,
+                &no_goal_file(),
+            );
         }
 
         assert!(matches!(event_rx.recv().unwrap(), DriverEvent::TurnStarted));
@@ -1894,9 +2514,11 @@ mod tests {
             PiFlavor::OhMyPi,
             json!({"type": "session_info_update", "title": "Named by Oh My Pi"}),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -1952,9 +2574,11 @@ mod tests {
             PiFlavor::Pi,
             json!({"type": "session_info_changed", "name": "Named by Pi"}),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -1965,9 +2589,11 @@ mod tests {
             PiFlavor::Pi,
             json!({"type": "session_info_changed", "name": null}),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -1989,9 +2615,11 @@ mod tests {
                 }
             }),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
 
         assert!(matches!(event_rx.try_recv(), Err(TryRecvError::Empty)));
@@ -2014,9 +2642,11 @@ mod tests {
                 }
             }),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
 
         assert!(matches!(
@@ -2050,9 +2680,11 @@ mod tests {
                 }
             }),
             &pending,
+            &no_extension_ui(),
             &commands,
             &events,
             &mut state,
+            &no_goal_file(),
         );
 
         assert!(matches!(
@@ -2104,9 +2736,11 @@ mod tests {
                 PiFlavor::Pi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -2144,9 +2778,11 @@ mod tests {
                 PiFlavor::Pi,
                 value,
                 &pending,
+                &no_extension_ui(),
                 &commands,
                 &events,
                 &mut state,
+                &no_goal_file(),
             );
         }
 
@@ -2156,5 +2792,385 @@ mod tests {
             event_rx.recv().unwrap(),
             DriverEvent::TurnFinished { success: true, .. }
         ));
+    }
+
+    #[test]
+    fn permission_extension_request_uses_native_permission_and_response() {
+        let (pending, commands, command_rx, mut state) = harness();
+        let pending_extension_ui = no_extension_ui();
+        let (events, event_rx) = unbounded();
+        handle_pi_message(
+            PiFlavor::Pi,
+            json!({
+                "type": "extension_ui_request",
+                "id": "permission-1",
+                "method": "select",
+                "title": "Permission Required\ntool : bash\nvalue : git status",
+                "options": [
+                    "Yes",
+                    "Yes, allow bash \"git status\" for this session",
+                    "No",
+                    "No, provide reason"
+                ]
+            }),
+            &pending,
+            &pending_extension_ui,
+            &commands,
+            &events,
+            &mut state,
+            &no_goal_file(),
+        );
+
+        let DriverEvent::Permission {
+            request_id,
+            title,
+            detail,
+            options,
+        } = event_rx.recv().expect("permission event")
+        else {
+            panic!("permission select must use the native permission event");
+        };
+        assert_eq!(request_id, "permission-1");
+        assert_eq!(title, "Permission Required");
+        assert_eq!(detail, "tool : bash\nvalue : git status");
+        assert_eq!(options.len(), 4);
+        assert!(options[0].allow && options[1].allow);
+        assert!(!options[2].allow && !options[3].allow);
+
+        let selected = options[1].id.clone();
+        let driver = PiDriver {
+            flavor: PiFlavor::Pi,
+            commands,
+            pending_extension_ui,
+            computer_use: None,
+        };
+        driver.respond("permission-1".into(), selected.clone());
+        let Ok(CommandMessage::RespondExtensionUi { payload }) = command_rx.recv() else {
+            panic!("permission response must reach the writer");
+        };
+        assert_eq!(
+            payload,
+            json!({
+                "type": "extension_ui_response",
+                "id": "permission-1",
+                "value": selected
+            })
+        );
+
+        // Unknown/stale options never consume or write a response.
+        driver.respond("permission-1".into(), "not-an-option".into());
+        assert!(command_rx.try_recv().is_err());
+    }
+
+    /// PIWAKU: drives the full extension-dialog round trip against a fake RPC
+    /// process — request normalization out, panel answer back as the exact
+    /// `extension_ui_response` frame. Ignored because it spawns a local
+    /// fixture script; run with `cargo test -p waku-core -- --ignored`.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "spawns a local fake pi process"]
+    fn extension_dialog_round_trip_against_a_fake_rpc_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = std::env::temp_dir().join("piwaku-fake-pi-test.mjs");
+        let session_file = std::path::Path::new("/tmp/fake-pi-session.jsonl");
+        let received_log = std::path::Path::new("/tmp/piwaku-fake-received.log");
+        let no_plan_flag = std::path::Path::new("/tmp/piwaku-fake-no-plan");
+        let todo_flag = std::path::Path::new("/tmp/piwaku-fake-todo");
+        let _ = std::fs::remove_file(session_file);
+        let _ = std::fs::remove_file(received_log);
+        let _ = std::fs::remove_file(no_plan_flag);
+        let _ = std::fs::remove_file(todo_flag);
+        std::fs::write(
+            &fixture,
+            r#"#!/usr/bin/env node
+import fs from "node:fs";
+let buf = "";
+let planStarts = 0;
+let activeSessionFile = "/tmp/fake-pi-session.jsonl";
+function out(o) { process.stdout.write(JSON.stringify(o) + "\n"); }
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let i;
+  while ((i = buf.indexOf("\n")) >= 0) {
+    const line = buf.slice(0, i).trim();
+    buf = buf.slice(i + 1);
+    if (!line) continue;
+    let m; try { m = JSON.parse(line); } catch { continue; }
+    fs.appendFileSync('/tmp/piwaku-fake-received.log', JSON.stringify(m) + '\n');
+    if (m.type === "extension_ui_response") {
+      const ok = m.value === "1. Alpha \u2014 a";
+      process.stderr.write(ok ? "FAKEPI ok\n" : `FAKEPI error mismatch: ${JSON.stringify(m)}\n`);
+      out({ type: "agent_start" });
+      out({ type: "agent_settled" });
+      setTimeout(() => process.exit(ok ? 0 : 2), 150);
+    } else if (m.type === "prompt") {
+      if (m.message === "/plan start") {
+        planStarts += 1;
+        // Simulate a successful RPC whose extension state refuses the second
+        // transition; Waku must report the persisted Build state, not Plan.
+        if (planStarts === 1) {
+          fs.writeFileSync('/tmp/fake-pi-session.jsonl', JSON.stringify({type:'custom',customType:'plan-mode-state',data:{enabled:true}}) + '\n');
+        }
+      } else if (m.message === "/plan exit") {
+        fs.writeFileSync('/tmp/fake-pi-session.jsonl', JSON.stringify({type:'custom',customType:'plan-mode-state',data:{enabled:false}}) + '\n');
+      } else {
+        out({ type: "extension_ui_request", id: "t-1", method: "select", title: "Pick", options: ["1. Alpha \u2014 a", "2. Beta \u2014 b"] });
+      }
+      out({ type: "response", id: m.id ?? "x", success: true });
+    } else if (m.type === "get_commands") {
+      const commands = fs.existsSync('/tmp/piwaku-fake-no-plan') ? [] : [{name:'plan',source:'extension'}];
+      out({ type: "response", id: m.id ?? "x", success: true, data: { commands } });
+    } else if (m.type === "get_entries") {
+      const entries = fs.existsSync('/tmp/piwaku-fake-todo') ? [{
+        type: 'message',
+        id: 'todo-1',
+        message: {
+          role: 'toolResult',
+          toolName: 'todo',
+          isError: false,
+          details: { nextId: 2, tasks: [{ id: 1, subject: 'resume todo', status: 'pending' }] }
+        },
+        parentId: null
+      }] : [];
+      out({ type: "response", id: m.id ?? "x", success: true, data: { entries, leafId: entries.length ? 'todo-1' : null } });
+    } else if (m.type === "switch_session") {
+      activeSessionFile = m.sessionPath;
+      out({ type: "response", id: m.id ?? "x", success: true, data: { sessionFile: activeSessionFile } });
+    } else if (m.type && m.type !== "abort") {
+      out({ type: "response", id: m.id ?? "x", success: true, data: { model: "test/model", sessionId: "s", sessionFile: activeSessionFile } });
+    }
+  }
+});
+"#,
+        )
+        .expect("write fixture");
+        std::fs::set_permissions(&fixture, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod fixture");
+
+        // A Plan request must fail before Connected when the command is not
+        // registered, and it must never send the raw /plan prompt.
+        std::fs::write(no_plan_flag, "").expect("disable fake plan command");
+        let (missing_events, missing_rx) = crate::driver::test_event_channel();
+        let missing_driver = PiDriver::start(
+            PiFlavor::Pi,
+            DriverStartOptions {
+                binary: fixture.clone(),
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                interaction_mode: InteractionMode::Plan,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: None,
+            },
+            missing_events,
+        )
+        .expect("fake Pi without plan command should start its RPC process");
+        let mut saw_error = false;
+        let mut saw_build = false;
+        let mut saw_failed_turn = false;
+        let mut saw_connected = false;
+        while !(saw_error && saw_build && saw_failed_turn) {
+            match missing_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::Error(_)) => saw_error = true,
+                Ok(DriverEvent::InteractionModeUpdated(InteractionMode::Build)) => saw_build = true,
+                Ok(DriverEvent::TurnFinished { success: false, .. }) => saw_failed_turn = true,
+                Ok(DriverEvent::Connected { .. }) => saw_connected = true,
+                Err(_) => panic!("timed out waiting for unavailable plan command"),
+                _ => {}
+            }
+        }
+        assert!(!saw_connected);
+        drop(missing_driver);
+        let missing_prompts = std::fs::read_to_string(received_log)
+            .expect("fake RPC should record get_commands")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|message| message.get("type").and_then(Value::as_str) == Some("prompt"))
+            .count();
+        assert_eq!(missing_prompts, 0);
+
+        // A resumed Plan session with no registered command must also project
+        // Build even when its session file cannot be read.
+        let resume_session_file = std::env::temp_dir().join(format!(
+            "piwaku-fake-resume-missing-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&resume_session_file);
+        std::fs::write(todo_flag, "").expect("enable fake todo hydration");
+        let (resume_events, resume_rx) = crate::driver::test_event_channel();
+        let resume_driver = PiDriver::start(
+            PiFlavor::Pi,
+            DriverStartOptions {
+                binary: fixture.clone(),
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                interaction_mode: InteractionMode::Plan,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: Some(ProviderResumeCursor::Pi {
+                    session_id: "resume".to_owned(),
+                    session_file: Some(resume_session_file.clone()),
+                }),
+            },
+            resume_events,
+        )
+        .expect("fake Pi resume should start its RPC process");
+        let mut resume_saw_error = false;
+        let mut resume_saw_build = false;
+        let mut resume_saw_connected = false;
+        let mut resume_saw_todo = false;
+        while !(resume_saw_error && resume_saw_build && resume_saw_connected && resume_saw_todo) {
+            match resume_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::Error(_)) => resume_saw_error = true,
+                Ok(DriverEvent::InteractionModeUpdated(InteractionMode::Build)) => {
+                    resume_saw_build = true
+                }
+                Ok(DriverEvent::Connected { .. }) => resume_saw_connected = true,
+                Ok(DriverEvent::TodoStateUpdated(snapshot)) => {
+                    assert_eq!(snapshot.tasks[0].subject, "resume todo");
+                    resume_saw_todo = true;
+                }
+                Err(_) => panic!("timed out waiting for unreadable resume state fallback"),
+                _ => {}
+            }
+        }
+        drop(resume_driver);
+        assert!(!resume_saw_connected || resume_saw_build);
+        let _ = std::fs::remove_file(&resume_session_file);
+        let _ = std::fs::remove_file(no_plan_flag);
+        let _ = std::fs::remove_file(todo_flag);
+
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = PiDriver::start(
+            PiFlavor::Pi,
+            DriverStartOptions {
+                binary: fixture.clone(),
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                interaction_mode: InteractionMode::Plan,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("fake Pi session should start");
+
+        // Handshake completes on its own; mode commands are tested before the
+        // ordinary prompt/extension round trip.
+        loop {
+            match event_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::Connected { .. }) => break,
+                Ok(DriverEvent::Error(error)) => panic!("fixture failed to initialize: {error}"),
+                Err(_) => panic!("timed out waiting for handshake"),
+                _ => {}
+            }
+        }
+
+        assert!(driver.apply_options(SessionOptions {
+            mode: RuntimeMode::FullAccess,
+            interaction_mode: InteractionMode::Build,
+            model: None,
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+        }));
+        loop {
+            match event_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::InteractionModeUpdated(InteractionMode::Build)) => break,
+                Ok(DriverEvent::Error(error)) => panic!("mode switch failed: {error}"),
+                Err(_) => panic!("timed out waiting for Build mode"),
+                _ => {}
+            }
+        }
+
+        assert!(driver.apply_options(SessionOptions {
+            mode: RuntimeMode::FullAccess,
+            interaction_mode: InteractionMode::Plan,
+            model: None,
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+        }));
+        loop {
+            match event_rx.recv_timeout(Duration::from_secs(15)) {
+                // The fake acknowledges /plan start but deliberately leaves
+                // persisted state at Build.
+                Ok(DriverEvent::InteractionModeUpdated(InteractionMode::Build)) => break,
+                Ok(DriverEvent::Error(error)) => panic!("mode switch failed: {error}"),
+                Err(_) => panic!("timed out waiting for persisted Build mode"),
+                _ => {}
+            }
+        }
+
+        let received_prompts = std::fs::read_to_string(received_log)
+            .expect("fake RPC should record received frames")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter_map(|message| {
+                (message.get("type").and_then(Value::as_str) == Some("prompt"))
+                    .then(|| {
+                        message
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            received_prompts,
+            ["/plan start", "/plan exit", "/plan start"]
+        );
+
+        driver.prompt("go".into());
+        let mut answered_request_id = None;
+        let mut finished = false;
+        while !finished {
+            match event_rx.recv_timeout(Duration::from_secs(15)) {
+                Ok(DriverEvent::UserInputRequested {
+                    request_id,
+                    questions,
+                }) => {
+                    assert_eq!(questions.len(), 1);
+                    assert_eq!(questions[0].options.len(), 2);
+                    driver.respond_user_input(
+                        request_id.clone(),
+                        vec![UserInputAnswer {
+                            question_id: request_id.clone(),
+                            answers: vec!["1. Alpha \u{2014} a".to_owned()],
+                        }],
+                    );
+                    answered_request_id = Some(request_id);
+                }
+                Ok(DriverEvent::TurnFinished { success: true, .. }) => {
+                    finished = true;
+                }
+                Ok(DriverEvent::Error(error)) => {
+                    panic!("dialog round trip surfaced an error: {error}");
+                }
+                Err(_) => panic!("timed out mid dialog; answered={answered_request_id:?}"),
+                _ => {}
+            }
+        }
+        assert_eq!(answered_request_id.as_deref(), Some("t-1"));
+        let _ = std::fs::remove_file(&fixture);
+        let _ = std::fs::remove_file(session_file);
+        let _ = std::fs::remove_file(received_log);
+        let _ = std::fs::remove_file(todo_flag);
     }
 }

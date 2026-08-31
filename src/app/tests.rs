@@ -6,14 +6,15 @@ use super::runtime::{merge_remote_session_catalog, session_has_active_provider_t
 use super::settings::visible_settings_pages;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
-    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
-    StreamDeltaKind, TranscriptRowKind::*, active_navigation_turn_index,
-    append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
-    fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
-    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
-    message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
-    navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
+    NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput,
+    PiNotificationPresentation, SessionNavigation, StreamDeltaKind, TranscriptRowKind::*,
+    active_navigation_turn_index, append_text_delta_to_session, assistant_response_footer,
+    assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
+    disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
+    folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
+    maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
+    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
+    navigation_rail_scale, paused_toast_duration, pi_notification_presentation, pop_stream_batch,
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
     session_accepts_turn_output, session_is_reapable, should_refresh_branch_after_activity,
     should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
@@ -384,6 +385,22 @@ fn task_notification_tags_route_to_the_corresponding_task() {
     assert_eq!(task_id_from_notification_tag(&tag), Some(session_id));
     assert_eq!(task_id_from_notification_tag("waku-task:not-a-uuid"), None);
     assert_eq!(task_id_from_notification_tag(&session_id.to_string()), None);
+}
+
+#[test]
+fn pi_notifications_choose_inline_or_alert_presentation() {
+    assert_eq!(
+        pi_notification_presentation("info"),
+        PiNotificationPresentation::Inline
+    );
+    assert_eq!(
+        pi_notification_presentation("warning"),
+        PiNotificationPresentation::Alert
+    );
+    assert_eq!(
+        pi_notification_presentation("error"),
+        PiNotificationPresentation::Alert
+    );
 }
 
 #[test]
@@ -1881,6 +1898,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Appearance,
         SettingsPage::Providers,
         SettingsPage::Skills,
+        SettingsPage::Pi,
         SettingsPage::Usage,
         SettingsPage::Daemon,
     ];

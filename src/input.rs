@@ -74,11 +74,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-end", SelectToEnd, Some("TextInput")),
         KeyBinding::new("alt-left", MoveToPreviousWord, Some("TextInput")),
         KeyBinding::new("alt-right", MoveToNextWord, Some("TextInput")),
-        KeyBinding::new(
-            "alt-shift-left",
-            SelectToPreviousWord,
-            Some("TextInput"),
-        ),
+        KeyBinding::new("alt-shift-left", SelectToPreviousWord, Some("TextInput")),
         KeyBinding::new("alt-shift-right", SelectToNextWord, Some("TextInput")),
         KeyBinding::new("secondary-a", SelectAll, Some("TextInput")),
         KeyBinding::new("secondary-v", Paste, Some("TextInput")),
@@ -125,19 +121,11 @@ pub fn init(cx: &mut App) {
     // The word-motion chords Windows and the Linux desktops share.
     #[cfg(not(target_os = "macos"))]
     cx.bind_keys([
-        KeyBinding::new(
-            "ctrl-backspace",
-            DeleteToPreviousWord,
-            Some("TextInput"),
-        ),
+        KeyBinding::new("ctrl-backspace", DeleteToPreviousWord, Some("TextInput")),
         KeyBinding::new("ctrl-delete", DeleteToNextWord, Some("TextInput")),
         KeyBinding::new("ctrl-left", MoveToPreviousWord, Some("TextInput")),
         KeyBinding::new("ctrl-right", MoveToNextWord, Some("TextInput")),
-        KeyBinding::new(
-            "ctrl-shift-left",
-            SelectToPreviousWord,
-            Some("TextInput"),
-        ),
+        KeyBinding::new("ctrl-shift-left", SelectToPreviousWord, Some("TextInput")),
         KeyBinding::new("ctrl-shift-right", SelectToNextWord, Some("TextInput")),
     ]);
 }
@@ -555,6 +543,9 @@ pub struct TextInput {
     focus_handle: FocusHandle,
     mode: FieldMode,
     read_only: bool,
+    /// Paint the content as one masking glyph per content byte without
+    /// changing the stored text or its byte-offset selection ranges.
+    obscured: bool,
     /// Enter submits this multi-line field instead of inserting a newline;
     /// Shift+Enter still breaks the line. (One-line fields always submit.)
     submit_on_enter: bool,
@@ -661,6 +652,7 @@ impl TextInput {
             focus_handle,
             mode: FieldMode::SingleLine,
             read_only: false,
+            obscured: false,
             submit_on_enter: false,
             auto_height: false,
             accepts_media_paste: false,
@@ -843,6 +835,13 @@ impl TextInput {
     /// the read lands and says the file is writable.
     pub fn set_read_only(&mut self, read_only: bool) {
         self.read_only = read_only;
+    }
+
+    /// Paint the field as a masked value while retaining the real content for
+    /// editing and submission.
+    pub fn obscured(mut self, obscured: bool) -> Self {
+        self.obscured = obscured;
+        self
     }
 
     /// Re-tokenize after a content change. Cheap for a composer (no language),
@@ -2150,6 +2149,10 @@ fn input_text_runs(
         .collect()
 }
 
+fn obscured_display(content: &str) -> String {
+    "*".repeat(content.len())
+}
+
 impl IntoElement for InputElement {
     type Element = Self;
 
@@ -2186,7 +2189,11 @@ impl Element for InputElement {
             (input.placeholder.clone(), theme.text_ghost, None, None)
         } else {
             (
-                content,
+                if input.obscured {
+                    obscured_display(&content).into()
+                } else {
+                    content.clone()
+                },
                 style.color,
                 Some(&input.selected_range),
                 input.marked_range.as_ref(),
@@ -2618,7 +2625,8 @@ impl ComposerInput {
     }
 
     pub fn set_content(&mut self, content: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.input.update(cx, |input, cx| input.set_content(content, cx));
+        self.input
+            .update(cx, |input, cx| input.set_content(content, cx));
     }
 
     pub fn set_placeholder(
@@ -2707,8 +2715,9 @@ mod tests {
     use super::{
         ComposerEvent, ComposerInput, EditHistory, FieldMode, SearchPaint, TextInput,
         UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, cursor_should_be_visible, input_text_runs,
-        media_paste_entries, next_word_boundary, pasted_text_for_mode, previous_word_boundary,
-        single_line_scroll, trimmed_splice, visual_row_count, word_range_at,
+        media_paste_entries, next_word_boundary, obscured_display, pasted_text_for_mode,
+        previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
+        word_range_at,
     };
 
     struct InputHarness {
@@ -2875,6 +2884,14 @@ mod tests {
             media_paste_entries(&file_clipboard).as_deref(),
             Some([ClipboardEntry::ExternalPaths(found)]) if found == &paths
         ));
+    }
+
+    #[test]
+    fn obscured_display_preserves_content_byte_length() {
+        let content = "pāss🔐";
+        let display = obscured_display(content);
+        assert_eq!(display, "*".repeat(content.len()));
+        assert_eq!(display.len(), content.len());
     }
 
     #[test]

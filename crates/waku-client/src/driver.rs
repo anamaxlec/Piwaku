@@ -83,6 +83,10 @@ impl DriverHandle {
         self.inner.goal(operation);
     }
 
+    pub fn cancel_user_input(&self, request_id: String) {
+        self.inner.cancel_user_input(request_id);
+    }
+
     pub fn run_computer_tool(&self, request: ComputerToolRequest) {
         self.inner.run_computer_tool(request);
     }
@@ -121,6 +125,9 @@ pub trait DriverControl: Send + Sync {
     fn respond(&self, request_id: String, option_id: String);
     fn respond_user_input(&self, _request_id: String, _answers: Vec<UserInputAnswer>) {}
     fn goal(&self, _operation: GoalOperation) {}
+    /// Decline a pending structured-question request (no-op for transports
+    /// whose requests cannot be explicitly declined).
+    fn cancel_user_input(&self, _request_id: String) {}
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}
     fn reject_computer_tool(&self, _request: ComputerToolRequest, _reason: String) {}
     fn apply_options(&self, _options: SessionOptions) -> bool {

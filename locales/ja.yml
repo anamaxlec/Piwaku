@@ -77,6 +77,84 @@ language.description: Waku 全体で使用する言語を選択します
 settings.general: 一般
 settings.appearance: 外観
 settings.providers: プロバイダー
+settings.pi: Pi
+settings.pi_keywords: "pi 拡張 プラグイン パッケージ"
+pi_ext.loading: "インストール済みPi拡張を読み込み中…"
+pi_ext.restart_note: "変更は新しいPiセッションから適用されます。"
+pi_ext.scope_user: グローバル
+pi_ext.scope_project: プロジェクト
+pi_ext.compat_native: ネイティブ
+pi_ext.compat_replaced: "Wakuが置き換え"
+pi_ext.compat_tui_only: "TUI専用"
+pi_ext.compat_generic: 互換
+pi_ext.check_update: 更新確認
+pi_ext.checking_update: "確認中…"
+pi_ext.update: 更新
+pi_ext.update_available: 更新あり
+pi_ext.up_to_date: 最新です
+pi_ext.update_unavailable: 利用不可
+pi_ext.remove: 削除
+pi_ext.confirm_remove: 削除を確認
+pi_ext.enable_before_remove: 削除する前に有効化してください
+pi_ext.updated_toast: "拡張機能を更新しました。新しい Pi セッションで使用されます。"
+pi_ext.removed_toast: "拡張機能を削除しました。新しい Pi セッションから反映されます。"
+pi_ext.action_failed: "拡張機能の操作に失敗しました: %{error}"
+pi_ext.discovered_read_only: Pi による自動検出（読み取り専用）
+pi_settings.general: 一般
+pi_settings.extensions: 拡張機能
+pi_settings.providers: プロバイダー
+pi_settings.models_path: モデルパス
+pi_settings.provider_editor: プロバイダー編集
+pi_settings.provider_key_hint: API キーは表示されません。現在のキーを維持するには空欄にしてください。
+pi_settings.provider_id_placeholder: プロバイダー ID
+pi_settings.provider_name_placeholder: 表示名
+pi_settings.provider_base_url_placeholder: ベース URL
+pi_settings.provider_api_placeholder: API
+pi_settings.provider_api_key_placeholder: API キー（空欄で変更なし）
+pi_settings.supported_apis: "対応 API: openai-completions、openai-responses、anthropic-messages、google-generative-ai"
+pi_settings.model_provider_placeholder: プロバイダー ID
+pi_settings.model_id_placeholder: モデル ID
+pi_settings.model_name_placeholder: モデル名
+pi_settings.model_api_placeholder: API 上書き（任意）
+pi_settings.model_reasoning_placeholder: "推論: true/false"
+pi_settings.model_input_placeholder: "入力: text または text+image"
+pi_settings.model_context_placeholder: コンテキストウィンドウ
+pi_settings.model_max_tokens_placeholder: 最大トークン数
+pi_settings.save_provider: プロバイダーを保存
+pi_settings.new_provider: 新しいプロバイダー
+pi_settings.clear_api_key: API キーを消去
+pi_settings.edit: 編集
+pi_settings.delete: 削除
+pi_settings.confirm_delete: 削除を確認
+pi_settings.new_model: 新しいモデル
+pi_settings.save_model: モデルを保存
+pi_settings.no_providers: カスタムプロバイダーは設定されていません。
+pi_settings.no_models: モデルは設定されていません。
+pi_settings.api_key_configured: API キー設定済み
+pi_settings.api_key_not_configured: API キー未設定
+pi_settings.read_only_provider: 未対応のプロバイダー API のため読み取り専用です。
+pi_settings.extension_settings: 拡張設定
+pi_settings.advanced: 詳細設定
+pi_settings.default_provider: デフォルトプロバイダー
+pi_settings.default_model: デフォルトモデル
+pi_settings.default_thinking_level: デフォルト思考レベル
+pi_settings.quiet_startup: 静かな起動
+pi_settings.quiet_startup_description: 起動バナーを表示せずに Pi を起動します。
+pi_settings.not_set: 未設定
+pi_settings.loading: Pi 設定を読み込み中…
+pi_settings.unavailable: 利用不可
+pi_settings.no_extensions: Pi 拡張機能はありません。
+pi_settings.no_extension_settings: このスコープに拡張設定はありません。
+pi_settings.no_project_settings: プロジェクトスコープは設定されていません。
+pi_settings.global: グローバル
+pi_settings.project: プロジェクト
+pi_settings.config_path: グローバル設定パス
+pi_settings.open_config: 設定を開く
+pi_settings.reveal_config: 設定を表示
+pi_settings.remote_unavailable: 設定ファイルはデーモンホスト上にあるため、リモート接続ではデスクトップのファイル操作を利用できません。
+pi_settings.reload_runtime: Pi ランタイムを再読み込み
+pi_settings.reload_runtime_description: 選択中の実行中 Pi セッションを再読み込みします。次のプロンプトは同じカーソルから再開します。
+pi_settings.runtime_reloaded: Pi ランタイムを再読み込みしました
 settings.usage: 使用状況
 settings.daemon: デーモン
 settings.computer_use: コンピュータ操作
@@ -323,6 +401,19 @@ activity.action_think: 思考
 activity.action_run: 実行
 activity.action_edit: 編集
 activity.action_read: 読み込み
+activity.summary.sources: "%{count} 件のソース"
+activity.summary.queries: "%{done}/%{total} 件のクエリ、%{sources}"
+activity.summary.curated: "%{summary} (%{kept}/%{from} クエリをキュレーション)"
+activity.summary.chars: "%{title}（%{chars} 文字）"
+activity.summary.urls: "%{count} 件のURL"
+activity.summary.urls_chars: "%{count} 件のURL（%{chars} 文字）"
+activity.summary.images: " [%{count} 枚の画像]"
+activity.summary.truncated: " [切り捨て済み]"
+activity.progress.searching: 検索中
+activity.progress.curating: 結果を整理中
+activity.progress.generating_summary: 要約を生成中
+activity.progress.waiting_approval: 承認待ち
+activity.progress.fetching: 取得中
 activity.action_search: 検索
 activity.action_list: 一覧
 activity.action_plan: 計画
@@ -593,6 +684,11 @@ goal.usage_tokens_unbudgeted: "%{used} トークン"
 composer.edit_in_composer: 入力欄で編集
 composer.steer: 指示を追加
 composer.remove_followup: キューから削除
+user_input.confirm_ok: 確認
+user_input.confirm_cancel: キャンセル
+user_input.dismiss: キャンセル
+todo_panel.title: タスク
+todo_panel.progress: "%{completed} / %{total}"
 user_input.other_placeholder: 別の回答を入力
 user_input.back: 戻る
 user_input.next: 次へ
@@ -697,6 +793,7 @@ errors.provider_no_active_turn: "%{provider} には指示を追加できる実�
 errors.provider_transport_write: "%{provider} の通信への書き込みに失敗しました：%{error}"
 errors.provider_transport_write_short: "%{provider} の通信への書き込みに失敗しました"
 errors.provider_transport_read: "%{provider} の通信の読み込みに失敗しました：%{error}"
+errors.provider_stdout_noise: "%{provider} が制御ストリームに非JSON出力を書き込みました（通常は拡張機能のconsole.logが原因）。セッションは中断されません。最初の行: %{snippet}"
 errors.provider_invalid_json: "%{provider} から無効な JSON が送信されました：%{error}"
 errors.provider_exited: "%{provider} が %{status} で終了しました"
 errors.provider_rpc_exited: "%{provider} RPC が %{status} で終了しました"

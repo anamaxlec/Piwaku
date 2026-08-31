@@ -19,7 +19,7 @@ pub struct UpdaterState(pub Option<Updater>);
 
 impl Global for UpdaterState {}
 
-/// The compact state rendered by Waku. Update details remain owned by
+/// The compact state rendered by Piwaku. Update details remain owned by
 /// Sparkle and never enter a frame path.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UpdateStatus {
@@ -83,7 +83,7 @@ mod macos {
 
     struct UserDriverIvars {
         /// Explicit checks and the one-time automatic-check permission prompt
-        /// use Sparkle's own windows. Scheduled checks stay inside Waku.
+        /// use Sparkle's own windows. Scheduled checks stay inside Piwaku.
         standard_driver: Retained<AnyObject>,
         standard_presentation: Cell<bool>,
         standard_update_check: Cell<Option<isize>>,
@@ -607,7 +607,7 @@ mod macos {
                         .to_string_lossy()
                         .into_owned()
                 };
-                eprintln!("Waku updater: failed to load Sparkle: {reason}");
+                eprintln!("Piwaku updater: failed to load Sparkle: {reason}");
                 return None;
             }
 
@@ -656,7 +656,7 @@ mod macos {
                 ]
             };
             if !started {
-                eprintln!("Waku updater: Sparkle rejected its updater configuration");
+                eprintln!("Piwaku updater: Sparkle rejected its updater configuration");
                 return None;
             }
 
@@ -767,7 +767,7 @@ mod macos {
     }
 
     /// The embedded framework's dylib next to the running executable
-    /// (Contents/MacOS/Waku → Contents/Frameworks/Sparkle.framework/Sparkle).
+    /// (Contents/MacOS/Piwaku → Contents/Frameworks/Sparkle.framework/Sparkle).
     fn sparkle_library_path() -> Option<std::path::PathBuf> {
         let executable = std::env::current_exe().ok()?;
         let contents = executable.parent()?.parent()?;
@@ -786,7 +786,7 @@ mod macos {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
             let library = target_dir
-                .join("debug/Waku Debug.app/Contents/Frameworks/Sparkle.framework/Sparkle");
+                .join("debug/Piwaku Debug.app/Contents/Frameworks/Sparkle.framework/Sparkle");
             if !library.exists() {
                 return;
             }
@@ -1042,7 +1042,7 @@ mod windows {
                 return None;
             }
             if verifying_key().is_none() {
-                eprintln!("Waku updater: SUPublicEDKey is not a valid ed25519 key");
+                eprintln!("Piwaku updater: SUPublicEDKey is not a valid ed25519 key");
                 return None;
             }
 
@@ -1143,7 +1143,7 @@ mod windows {
                             if report {
                                 let _ = events.try_send(UpdaterEvent::Failed(error.to_string()));
                             } else {
-                                eprintln!("Waku updater: {error}");
+                                eprintln!("Piwaku updater: {error}");
                             }
                         }
                     }

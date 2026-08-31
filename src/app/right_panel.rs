@@ -1433,7 +1433,7 @@ mod tests {
         std::fs::create_dir_all(root.join("src/nested")).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
-        std::fs::write(root.join("README.md"), "# Waku\n").unwrap();
+        std::fs::write(root.join("README.md"), "# Piwaku\n").unwrap();
 
         let collapsed = visible_working_tree_entries(&root, &HashSet::new());
         assert_eq!(
@@ -3012,14 +3012,11 @@ impl Waku {
         .detach();
 
         let focused_path = relative_path.to_owned();
-        cx.subscribe(
-            &state,
-            move |this: &mut Self, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Focus) {
-                    this.reload_right_panel_file_if_clean(focused_path.as_str(), cx);
-                }
-            },
-        )
+        cx.subscribe(&state, move |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Focus) {
+                this.reload_right_panel_file_if_clean(focused_path.as_str(), cx);
+            }
+        })
         .detach();
 
         self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);

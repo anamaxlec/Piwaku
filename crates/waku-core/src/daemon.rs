@@ -140,6 +140,42 @@ impl WakuBackend {
         }
         Ok(checkpoint)
     }
+
+    fn registered_pi_projects(&self) -> Vec<(String, PathBuf)> {
+        self.task_state
+            .lock()
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .map(|project| (project.name.clone(), project.path.clone()))
+            .collect()
+    }
+}
+
+fn validate_pi_extension_project_request(
+    scope: crate::model::PiExtensionScope,
+    project_root: Option<&Path>,
+    client_projects: Option<&[(String, PathBuf)]>,
+    registered_projects: &[(String, PathBuf)],
+) -> anyhow::Result<()> {
+    match scope {
+        crate::model::PiExtensionScope::User if project_root.is_none() => Ok(()),
+        crate::model::PiExtensionScope::User => {
+            bail!("user-scope extensions cannot have a project root")
+        }
+        crate::model::PiExtensionScope::Project => {
+            let root = project_root.context("project-scope extensions need a project root")?;
+            if let Some(client_projects) = client_projects {
+                if !client_projects.iter().any(|(_, path)| path == root) {
+                    bail!("project root is not in the client project allowlist");
+                }
+            }
+            if !registered_projects.iter().any(|(_, path)| path == root) {
+                bail!("project root is not registered with the daemon");
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Storage-layout migrations belong to the daemon because both the database
@@ -284,6 +320,188 @@ impl Backend for WakuBackend {
                     crate::skills::set_skill_enabled(&dir, enabled)
                         .map_err(|error| anyhow!(error))?;
                 }
+                Ok(ResponsePayload::Ack)
+            }
+            Command::LoadPiExtensions { projects } => {
+                ensure_shell_environment();
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Pi)
+                    .map(String::as_str);
+                let binary = crate::model::provider_probe(ProviderKind::Pi, binary_override).path;
+                let extensions = crate::pi_settings::load_extensions_with_pi_list(
+                    &home,
+                    &projects,
+                    binary.as_deref(),
+                );
+                Ok(ResponsePayload::PiExtensions { extensions })
+            }
+            Command::SetPiExtensionEnabled {
+                source,
+                scope,
+                project_root,
+                enabled,
+            } => {
+                ensure_shell_environment();
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                let registered_projects = self.registered_pi_projects();
+                validate_pi_extension_project_request(
+                    scope,
+                    project_root.as_deref(),
+                    None,
+                    &registered_projects,
+                )?;
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Pi)
+                    .map(String::as_str);
+                let binary = crate::model::provider_probe(ProviderKind::Pi, binary_override).path;
+                crate::pi_settings::validate_extension_identity(
+                    binary.as_deref(),
+                    &home,
+                    &source,
+                    scope,
+                    project_root.as_deref(),
+                    &registered_projects,
+                    false,
+                )?;
+                crate::pi_settings::set_enabled(
+                    &home,
+                    &source,
+                    scope,
+                    project_root.as_deref(),
+                    enabled,
+                )?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::CheckPiExtensionUpdate { source } => {
+                ensure_shell_environment();
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                let latest_version = crate::pi_settings::check_extension_update(&source, &home);
+                Ok(ResponsePayload::PiExtensionUpdateCheck {
+                    source,
+                    latest_version,
+                })
+            }
+            Command::UpdatePiExtension {
+                source,
+                scope,
+                project_root,
+                projects,
+            } => {
+                ensure_shell_environment();
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                let registered_projects = self.registered_pi_projects();
+                validate_pi_extension_project_request(
+                    scope,
+                    project_root.as_deref(),
+                    Some(&projects),
+                    &registered_projects,
+                )?;
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Pi)
+                    .map(String::as_str);
+                let binary = crate::model::provider_probe(ProviderKind::Pi, binary_override)
+                    .path
+                    .ok_or_else(|| anyhow!("pi is not installed"))?;
+                crate::pi_settings::update_extension(
+                    &binary,
+                    &home,
+                    &source,
+                    scope,
+                    project_root.as_deref(),
+                    &registered_projects,
+                )?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RemovePiExtension {
+                source,
+                scope,
+                project_root,
+                projects,
+            } => {
+                ensure_shell_environment();
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                let registered_projects = self.registered_pi_projects();
+                validate_pi_extension_project_request(
+                    scope,
+                    project_root.as_deref(),
+                    Some(&projects),
+                    &registered_projects,
+                )?;
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Pi)
+                    .map(String::as_str);
+                let binary = crate::model::provider_probe(ProviderKind::Pi, binary_override)
+                    .path
+                    .ok_or_else(|| anyhow!("pi is not installed"))?;
+                crate::pi_settings::remove_extension(
+                    &binary,
+                    &home,
+                    &source,
+                    scope,
+                    project_root.as_deref(),
+                    &registered_projects,
+                )?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::LoadPiSettings { projects } => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                let snapshot = crate::pi_settings::load_settings_snapshot(&home, &projects);
+                Ok(ResponsePayload::PiSettings { snapshot })
+            }
+            Command::SetPiQuietStartup { enabled } => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                crate::pi_settings::set_quiet_startup(&home, enabled)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::LoadPiProviderSettings => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                Ok(ResponsePayload::PiProviderSettings {
+                    snapshot: crate::pi_provider_settings::load(&home),
+                })
+            }
+            Command::UpsertPiProvider {
+                id,
+                name,
+                base_url,
+                api,
+                api_key,
+            } => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                crate::pi_provider_settings::upsert_provider(
+                    &home,
+                    &id,
+                    name.as_deref(),
+                    base_url.as_deref(),
+                    &api,
+                    api_key,
+                )?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::DeletePiProvider { id } => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                crate::pi_provider_settings::delete_provider(&home, &id)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::UpsertPiModel { provider_id, model } => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                crate::pi_provider_settings::upsert_model(&home, &provider_id, &model)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::DeletePiModel {
+                provider_id,
+                model_id,
+            } => {
+                let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+                crate::pi_provider_settings::delete_model(&home, &provider_id, &model_id)?;
                 Ok(ResponsePayload::Ack)
             }
             Command::TrashSkills { dirs } => {
@@ -1650,6 +1868,7 @@ fn handle_driver_command(
             answers,
         } => driver.respond_user_input(request_id, answers),
         Command::Goal { operation } => driver.goal(operation),
+        Command::CancelUserInput { request_id } => driver.cancel_user_input(request_id),
         Command::RunComputerTool { request } => {
             driver.run_computer_tool(crate::computer_use::ComputerToolRequest {
                 call_id: request.call_id,
@@ -1701,6 +1920,18 @@ fn handle_driver_command(
         | Command::LoadSkills { .. }
         | Command::SetSkillsEnabled { .. }
         | Command::TrashSkills { .. }
+        | Command::LoadPiExtensions { .. }
+        | Command::SetPiExtensionEnabled { .. }
+        | Command::CheckPiExtensionUpdate { .. }
+        | Command::UpdatePiExtension { .. }
+        | Command::RemovePiExtension { .. }
+        | Command::LoadPiSettings { .. }
+        | Command::SetPiQuietStartup { .. }
+        | Command::LoadPiProviderSettings
+        | Command::UpsertPiProvider { .. }
+        | Command::DeletePiProvider { .. }
+        | Command::UpsertPiModel { .. }
+        | Command::DeletePiModel { .. }
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
@@ -1787,6 +2018,9 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::RichActivity(activity) => ("richActivity", serde_json::to_value(activity)?),
         DriverEvent::BackgroundWork(work) => ("backgroundWork", serde_json::to_value(work)?),
+        DriverEvent::TodoStateUpdated(snapshot) => {
+            ("todoStateUpdated", serde_json::to_value(snapshot)?)
+        }
         DriverEvent::Permission {
             request_id,
             title,
@@ -1837,6 +2071,16 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
+        DriverEvent::InteractionModeUpdated(mode) => {
+            ("interactionModeUpdated", serde_json::to_value(mode)?)
+        }
+        DriverEvent::Notification { message, level } => (
+            "notification",
+            json!({ "message": message, "level": level }),
+        ),
+        DriverEvent::MagicContextStatusUpdated(status) => {
+            ("magicContextStatusUpdated", serde_json::to_value(status)?)
+        }
         DriverEvent::TurnFinished { success, summary } => (
             "turnFinished",
             json!({ "success": success, "summary": summary }),
@@ -1918,6 +2162,21 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
+        "interactionModeUpdated" => {
+            DriverEvent::InteractionModeUpdated(serde_json::from_value(payload)?)
+        }
+        "notification" => {
+            let notification: NotificationWire = serde_json::from_value(payload)?;
+            DriverEvent::Notification {
+                message: notification.message,
+                level: notification.level,
+            }
+        }
+        "magicContextStatusUpdated" => {
+            DriverEvent::MagicContextStatusUpdated(serde_json::from_value::<
+                Option<crate::model::MagicContextStatus>,
+            >(payload)?)
+        }
         "turnFinished" => {
             let finished: TurnFinishedWire = serde_json::from_value(payload)?;
             DriverEvent::TurnFinished {
@@ -1955,6 +2214,13 @@ struct PermissionWire {
 struct UserInputWire {
     request_id: String,
     questions: Vec<crate::model::UserInputQuestion>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationWire {
+    message: String,
+    level: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2104,6 +2370,19 @@ mod tests {
         assert!(matches!(
             event_from_wire(wire).unwrap(),
             DriverEvent::TextDelta(text) if text == "hello"
+        ));
+    }
+
+    #[test]
+    fn wire_event_round_trip_preserves_interaction_mode() {
+        let wire = event_to_wire(DriverEvent::InteractionModeUpdated(
+            crate::model::InteractionMode::Plan,
+        ))
+        .unwrap();
+        assert_eq!(wire.kind, "interactionModeUpdated");
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::InteractionModeUpdated(crate::model::InteractionMode::Plan)
         ));
     }
 }

@@ -1416,10 +1416,11 @@ impl Waku {
             project_id
         };
         let provider = summary.provider();
-        let runtime_mode = self
-            .selected_session()
-            .map(|session| session.runtime_mode)
-            .unwrap_or(self.state.last_runtime_mode);
+        let runtime_mode = super::sessions::provider_runtime_mode(
+            provider,
+            self.selected_session(),
+            self.state.last_runtime_mode,
+        );
         let now = unix_time();
         let created_at = if summary.created_at == 0 {
             now
@@ -2117,6 +2118,52 @@ mod tests {
 
         assert!(same_provider_session(&listed, &imported));
         assert!(!same_provider_session(&listed, &other));
+    }
+
+    #[test]
+    fn imported_pi_sessions_require_full_access() {
+        let mut current = AgentSession::new(Uuid::nil(), ProviderKind::Codex);
+        current.runtime_mode = RuntimeMode::Ask;
+
+        assert_eq!(
+            super::super::sessions::provider_runtime_mode(
+                ProviderKind::Pi,
+                Some(&current),
+                RuntimeMode::Auto
+            ),
+            RuntimeMode::FullAccess
+        );
+        assert_eq!(
+            super::super::sessions::provider_runtime_mode(
+                ProviderKind::OhMyPi,
+                Some(&current),
+                RuntimeMode::AutoAcceptEdits
+            ),
+            RuntimeMode::FullAccess
+        );
+    }
+
+    #[test]
+    fn imported_non_pi_sessions_keep_the_inherited_runtime_mode() {
+        let mut current = AgentSession::new(Uuid::nil(), ProviderKind::Claude);
+        current.runtime_mode = RuntimeMode::Ask;
+
+        assert_eq!(
+            super::super::sessions::provider_runtime_mode(
+                ProviderKind::Claude,
+                Some(&current),
+                RuntimeMode::Auto
+            ),
+            RuntimeMode::Ask
+        );
+        assert_eq!(
+            super::super::sessions::provider_runtime_mode(
+                ProviderKind::Codex,
+                None,
+                RuntimeMode::Auto
+            ),
+            RuntimeMode::Auto
+        );
     }
 
     #[test]

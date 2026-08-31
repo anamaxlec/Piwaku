@@ -355,9 +355,9 @@ jobs:
         with:
           name: macos
           path: |
-            dist/Waku-${{ needs.version.outputs.version }}.dmg
-            dist/Waku-${{ needs.version.outputs.version }}.md
-            dist/Waku-${{ needs.version.outputs.version }}.zip
+            dist/Piwaku-${{ needs.version.outputs.version }}.dmg
+            dist/Piwaku-${{ needs.version.outputs.version }}.md
+            dist/Piwaku-${{ needs.version.outputs.version }}.zip
             dist/appcast.xml
           if-no-files-found: error
 

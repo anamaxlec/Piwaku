@@ -73,6 +73,84 @@ language.description: 选择 Waku 的界面语言
 settings.general: 通用
 settings.appearance: 外观
 settings.providers: 服务商
+settings.pi: Pi
+settings.pi_keywords: "pi 插件 扩展 包"
+pi_ext.loading: 正在读取已安装的 pi 插件…
+pi_ext.restart_note: 更改对新开的 Pi 会话生效。
+pi_ext.scope_user: 全局
+pi_ext.scope_project: 项目
+pi_ext.compat_native: 原生适配
+pi_ext.compat_replaced: "Waku 已接管"
+pi_ext.compat_tui_only: 仅 TUI
+pi_ext.compat_generic: 兼容
+pi_ext.check_update: 检查更新
+pi_ext.checking_update: 检查中…
+pi_ext.update: 更新
+pi_ext.update_available: 有可用更新
+pi_ext.up_to_date: 已是最新
+pi_ext.update_unavailable: 不可用
+pi_ext.remove: 移除
+pi_ext.confirm_remove: 再次确认移除
+pi_ext.enable_before_remove: 请先启用再移除
+pi_ext.updated_toast: 插件已更新；新开的 Pi 会话将使用新版本。
+pi_ext.removed_toast: 插件已移除；新开的 Pi 会话将应用此更改。
+pi_ext.action_failed: "插件操作失败：%{error}"
+pi_ext.discovered_read_only: 由 Pi 自动发现；只读
+pi_settings.general: 通用
+pi_settings.extensions: 插件
+pi_settings.providers: 服务商
+pi_settings.models_path: 模型路径
+pi_settings.provider_editor: 服务商编辑
+pi_settings.provider_key_hint: API key 不会回显；留空可保留当前 key。
+pi_settings.provider_id_placeholder: 服务商 ID
+pi_settings.provider_name_placeholder: 显示名称
+pi_settings.provider_base_url_placeholder: 基础 URL
+pi_settings.provider_api_placeholder: API
+pi_settings.provider_api_key_placeholder: API key（留空不变）
+pi_settings.supported_apis: "支持 API：openai-completions、openai-responses、anthropic-messages、google-generative-ai"
+pi_settings.model_provider_placeholder: 服务商 ID
+pi_settings.model_id_placeholder: 模型 ID
+pi_settings.model_name_placeholder: 模型名称
+pi_settings.model_api_placeholder: API 覆盖（可选）
+pi_settings.model_reasoning_placeholder: "推理：true/false"
+pi_settings.model_input_placeholder: "输入：text 或 text+image"
+pi_settings.model_context_placeholder: 上下文窗口
+pi_settings.model_max_tokens_placeholder: 最大令牌数
+pi_settings.save_provider: 保存服务商
+pi_settings.new_provider: 新建服务商
+pi_settings.clear_api_key: 清除 API key
+pi_settings.edit: 编辑
+pi_settings.delete: 删除
+pi_settings.confirm_delete: 确认删除
+pi_settings.new_model: 新建模型
+pi_settings.save_model: 保存模型
+pi_settings.no_providers: 未配置自定义服务商。
+pi_settings.no_models: 未配置模型。
+pi_settings.api_key_configured: 已配置 API key
+pi_settings.api_key_not_configured: 未配置 API key
+pi_settings.read_only_provider: 不支持的服务商 API；只读。
+pi_settings.extension_settings: 插件设置
+pi_settings.advanced: 高级
+pi_settings.default_provider: 默认服务商
+pi_settings.default_model: 默认模型
+pi_settings.default_thinking_level: 默认思考级别
+pi_settings.quiet_startup: 静默启动
+pi_settings.quiet_startup_description: 启动 Pi 时不显示启动横幅。
+pi_settings.not_set: 未设置
+pi_settings.loading: 正在读取 Pi 设置…
+pi_settings.unavailable: 不可用
+pi_settings.no_extensions: 未找到 Pi 插件。
+pi_settings.no_extension_settings: 此范围没有插件设置。
+pi_settings.no_project_settings: 未配置项目范围。
+pi_settings.global: 全局
+pi_settings.project: 项目
+pi_settings.config_path: 全局配置路径
+pi_settings.open_config: 打开配置
+pi_settings.reveal_config: 在文件管理器中显示
+pi_settings.remote_unavailable: 配置文件位于守护进程主机上，远程连接不可使用桌面文件操作。
+pi_settings.reload_runtime: 重载 Pi 运行时
+pi_settings.reload_runtime_description: 重载当前运行中的 Pi 会话；下一条提示会从相同游标继续。
+pi_settings.runtime_reloaded: Pi 运行时已重载
 settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作
@@ -305,6 +383,19 @@ activity.action_think: 思考
 activity.action_run: 运行
 activity.action_edit: 编辑
 activity.action_read: 读取
+activity.summary.sources: "%{count} 个来源"
+activity.summary.queries: "%{done}/%{total} 次查询，%{sources}"
+activity.summary.curated: "%{summary}（%{kept}/%{from} 次查询已整理）"
+activity.summary.chars: "%{title}（%{chars} 字符）"
+activity.summary.urls: "%{count} 个网址"
+activity.summary.urls_chars: "%{count} 个网址（%{chars} 字符）"
+activity.summary.images: " [%{count} 张图片]"
+activity.summary.truncated: " [已截断]"
+activity.progress.searching: 搜索中
+activity.progress.curating: 整理结果
+activity.progress.generating_summary: 生成摘要
+activity.progress.waiting_approval: 等待确认
+activity.progress.fetching: 抓取中
 activity.action_search: 搜索
 activity.action_list: 列出
 activity.action_plan: 计划
@@ -564,6 +655,11 @@ goal.usage_tokens_unbudgeted: "%{used} 个 token"
 composer.edit_in_composer: 在输入框中编辑
 composer.steer: 引导
 composer.remove_followup: 从队列中移除
+user_input.confirm_ok: 确认
+user_input.confirm_cancel: 取消
+user_input.dismiss: 取消
+todo_panel.title: 任务
+todo_panel.progress: "%{completed} / %{total}"
 user_input.other_placeholder: 输入其他回答
 user_input.back: 上一步
 user_input.next: 下一步
@@ -662,6 +758,7 @@ errors.provider_no_active_turn: "%{provider} 当前没有可补充指示的任�
 errors.provider_transport_write: "%{provider} 通信写入失败：%{error}"
 errors.provider_transport_write_short: "%{provider} 通信写入失败"
 errors.provider_transport_read: "%{provider} 通信读取失败：%{error}"
+errors.provider_stdout_noise: "%{provider} 在控制流上输出了非 JSON 内容——通常是某个扩展在用 console.log。会话不受影响。首行内容：%{snippet}"
 errors.provider_invalid_json: "%{provider} 发来了无效的 JSON：%{error}"
 errors.provider_exited: "%{provider} 已退出（%{status}）"
 errors.provider_rpc_exited: "%{provider} RPC 已退出（%{status}）"

@@ -9,8 +9,10 @@ mod computer_use;
 mod deepseek;
 mod opencode;
 mod pi;
+mod pi_extensions;
 mod support;
 mod title_refresh;
+mod tool_progress;
 
 pub(crate) use acp::catalog_agent;
 
@@ -127,6 +129,10 @@ impl DriverHandle {
         self.inner.goal(operation);
     }
 
+    pub fn cancel_user_input(&self, request_id: String) {
+        self.inner.cancel_user_input(request_id);
+    }
+
     pub fn run_computer_tool(&self, request: ComputerToolRequest) {
         self.inner.run_computer_tool(request);
     }
@@ -166,6 +172,9 @@ pub trait DriverControl: Send + Sync {
     /// Providers without persisted goals ignore the request; the UI only
     /// offers goal controls where the provider reports one.
     fn goal(&self, _operation: GoalOperation) {}
+    /// Decline a pending structured-question request. Default is a no-op for
+    /// transports whose requests cannot be explicitly declined.
+    fn cancel_user_input(&self, _request_id: String) {}
     fn run_computer_tool(&self, _request: ComputerToolRequest) {}
     fn reject_computer_tool(&self, _request: ComputerToolRequest, _reason: String) {}
     /// Applies changed turn options to the live session, returning whether the

@@ -136,7 +136,7 @@ impl Waku {
 
     /// `(display name, path)` per scannable project. Projectless workspaces
     /// are generated directories that never hold curated skills.
-    fn skill_scan_projects(&self) -> Vec<(String, PathBuf)> {
+    pub(super) fn skill_scan_projects(&self) -> Vec<(String, PathBuf)> {
         self.state
             .projects
             .iter()

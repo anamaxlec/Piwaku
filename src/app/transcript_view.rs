@@ -385,7 +385,7 @@ impl Waku {
     /// the layout walks backwards from there, so the last row's bottom stays
     /// against the viewport as that row grows. The flag alone only re-pins in
     /// the phase where the anchor's end space has already collapsed to zero.
-    fn pin_transcript_to_tail(&self) {
+    pub(super) fn pin_transcript_to_tail(&self) {
         self.transcript_anchor_following
             .set(self.transcript_anchor.get().is_some());
         self.active_transcript_rows().scroll_to_end();
@@ -1292,12 +1292,12 @@ impl Waku {
                         .collect();
                     let attachments_can_reveal = !self.daemon.is_remote();
                     let menu = self.menu_handle(format!("message-{}", message.id), cx);
-                    let metrics = self.scaled_markdown_metrics(if message.role == MessageRole::User
-                    {
-                        MarkdownMetrics::USER_MESSAGE
-                    } else {
-                        MarkdownMetrics::BODY
-                    });
+                    let metrics =
+                        self.scaled_markdown_metrics(if message.role == MessageRole::User {
+                            MarkdownMetrics::USER_MESSAGE
+                        } else {
+                            MarkdownMetrics::BODY
+                        });
                     let animate_streaming = message.streaming && !cx.reduce_motion();
                     let mut ctx = self.markdown_ctx(
                         format!("message-{}", message.id),
@@ -2024,6 +2024,18 @@ impl Waku {
             if row_detail.trim().is_empty() {
                 row_detail = preview;
             }
+            // PIWAKU: live progress wins over the static detail — the row
+            // shows the query streaming right now and, when the provider
+            // reports a real ratio, a thin determinate bar.
+            let progress_status = activity_progress_status(activity);
+            if let Some(status) = progress_status {
+                row_detail = status;
+            }
+            let progress_fraction = activity
+                .progress
+                .as_ref()
+                .filter(|_| !activity.complete)
+                .and_then(|progress| progress.fraction);
             let file_change_stats = activity_file_change_stats(activity);
             // One changed file is unambiguous, so the row itself can offer to
             // open it. A change touching several names each file in the diff
@@ -2044,12 +2056,23 @@ impl Waku {
                 .is_some_and(|reasoning| !reasoning.content.trim().is_empty())
                 || !sections.is_empty()
                 || shows_diff;
+            // PIWAKU: tools with live progress (web search, fetch) stream
+            // their partial output open — the same default the reasoning
+            // block gets — and fold back to the settled row on completion.
+            // Expansion waits for the first streamed text so the row never
+            // flashes an arguments-only body.
+            let live_tool_output = !activity.complete
+                && activity.progress.is_some()
+                && activity
+                    .output
+                    .as_deref()
+                    .is_some_and(|output| !output.trim().is_empty());
             let item_expanded = has_detail
                 && self
                     .expanded_activity_items
                     .get(&id)
                     .copied()
-                    .unwrap_or(reasoning_live);
+                    .unwrap_or(reasoning_live || live_tool_output);
             let item_focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
             let mut item = div()
                 .w_full()
@@ -2109,6 +2132,9 @@ impl Waku {
                                     .child(SharedString::from(row_detail)),
                             )
                         })
+                        .when_some(progress_fraction, |row, fraction| {
+                            row.child(activity_progress_bar(fraction, theme))
+                        })
                         .when_some(file_change_stats, |row, (additions, deletions)| {
                             row.child(
                                 div()
@@ -2161,6 +2187,45 @@ impl Waku {
                             }
                         })),
                 );
+            // PIWAKU: settled web-access rows keep the TUI's completion
+            // signal — a check plus the status line ("11 sources", "Title
+            // (8529 chars)") right under the header, so finishing is visible
+            // without expanding anything.
+            let web_summary = if activity.complete
+                && !activity.failed
+                && matches!(activity.kind, ActivityKind::Search | ActivityKind::Tool)
+            {
+                activity
+                    .display_description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|summary| !summary.is_empty())
+            } else {
+                None
+            };
+            item = item.children(web_summary.map(|summary| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .px(px(9.0))
+                    .pb(px(7.0))
+                    .child(icon("icons/check.svg", 11.0, theme.success))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .max_w(gpui::relative(1.0))
+                            .px(px(5.0))
+                            .py(px(1.0))
+                            .rounded(px(4.0))
+                            .bg(theme.code_wash)
+                            .text_size(sp(11.5))
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_color(theme.code_text)
+                            .truncate()
+                            .child(SharedString::from(summary.to_owned())),
+                    )
+            }));
             if item_expanded && let Some(reasoning) = reasoning {
                 // Reasoning remains model prose even though it now shares the
                 // activity stream, so keep selectable markdown rather than
@@ -2429,18 +2494,15 @@ impl Waku {
                                     )),
                             );
                         } else {
-                            section_view = section_view.child(
-                                div()
-                                    .w_full()
-                                    .min_w_0()
-                                    .child(md::render::plain_text(
-                                        content.clone(),
-                                        md::render::MONO_FAMILY,
-                                        FontWeight::NORMAL,
-                                        theme.text_secondary,
-                                        &ctx,
-                                    )),
-                            );
+                            section_view = section_view.child(div().w_full().min_w_0().child(
+                                md::render::plain_text(
+                                    content.clone(),
+                                    md::render::MONO_FAMILY,
+                                    FontWeight::NORMAL,
+                                    theme.text_secondary,
+                                    &ctx,
+                                ),
+                            ));
                         }
                     }
                     detail_card = detail_card.child(section_view);

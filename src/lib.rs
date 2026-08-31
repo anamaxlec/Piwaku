@@ -193,7 +193,7 @@ impl WakuApplicationExt for Application {
 
 pub fn run() {
     let daemon = crate::daemon::start_process()
-        .unwrap_or_else(|error| panic!("failed to start Waku daemon: {error:#}"));
+        .unwrap_or_else(|error| panic!("failed to start Piwaku daemon: {error:#}"));
     gpui_platform::application()
         .with_assets(crate::assets::Assets)
         .with_main_window_reopen()
@@ -370,7 +370,7 @@ pub fn run() {
                         waku
                     },
                 )
-                .expect("failed to open Waku window");
+                .expect("failed to open Piwaku window");
 
             cx.on_system_notification_response({
                 let window = window;
